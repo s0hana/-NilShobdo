@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "557766983078",
+    "project_id": "nilshobdo-87fce",
+    "storage_bucket": "nilshobdo-87fce.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:557766983078:android:2f78751f49c1accf16a367",
+        "android_client_info": {
+          "package_name": "com.example.nilshobdo_app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDFarBnWhH-Er8Wv1nXaKt6MYhkPsB-Z-Y"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
