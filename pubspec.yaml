@@ -30,6 +30,8 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  just_audio: ^0.9.35
+  youtube_explode_dart: ^2.5.2
   webview_flutter: ^4.4.2
   audioplayers: ^5.0.0
   firebase_app_check: ^0.4.0

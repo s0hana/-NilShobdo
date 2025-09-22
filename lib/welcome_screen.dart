@@ -22,7 +22,7 @@ class WelcomeScreen extends StatelessWidget {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                // লোগো
+                
                 Container(
                   height: 100,
                   width: 100,
@@ -54,7 +54,6 @@ class WelcomeScreen extends StatelessWidget {
                 ),
 
                 const SizedBox(height: 60),
-                // Button → Login এ যাবে
                 ElevatedButton(
                   style: ElevatedButton.styleFrom(
                     backgroundColor: const Color(0xFF6C63FF),

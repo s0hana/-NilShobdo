@@ -29,7 +29,7 @@ class _VerifyEmailScreenState extends State<VerifyEmailScreen> {
       timer = Timer.periodic(const Duration(seconds: 3), (_) => checkEmailVerified());
     }
   }
-
+ 
   Future<void> checkEmailVerified() async {
     await _auth.currentUser!.reload();
     setState(() {
