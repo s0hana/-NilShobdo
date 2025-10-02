@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'home_screen.dart';
 import 'chat_history_screen.dart';
+import 'theme_manager.dart'; // Theme manager import করুন
 
 class ChatScreen extends StatefulWidget {
   final Map<String, dynamic> userData;
@@ -30,9 +31,14 @@ class _ChatScreenState extends State<ChatScreen> {
   // User information that will be extracted from conversations
   Map<String, dynamic> userPreferences = {};
 
+  // Theme variables
+  int _currentThemeIndex = 0;
+  ColorTheme _currentTheme = ThemeManager.colorThemes[0];
+
   @override
   void initState() {
     super.initState();
+    _loadTheme();
     
     // Generate or use existing chat ID
     currentChatId = widget.chatId ?? _db.push().key!;
@@ -47,6 +53,14 @@ class _ChatScreenState extends State<ChatScreen> {
     
     // Set up real-time listener for this chat
     _setupChatListener();
+  }
+
+  Future<void> _loadTheme() async {
+    final themeIndex = await ThemeManager.getSelectedThemeIndex();
+    setState(() {
+      _currentThemeIndex = themeIndex;
+      _currentTheme = ThemeManager.getCurrentTheme(themeIndex);
+    });
   }
 
   void _setupChatListener() {
@@ -443,8 +457,10 @@ class _ChatScreenState extends State<ChatScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text("Chat with Ikri"),
-        backgroundColor: const Color(0xFF2196F3),
+        backgroundColor: _currentTheme.primary,
         foregroundColor: Colors.black,
+        elevation: 2,
+        shadowColor: _currentTheme.primary.withOpacity(0.5),
         actions: [
           IconButton(
             icon: const Icon(Icons.settings, color: Colors.black),
@@ -456,26 +472,26 @@ class _ChatScreenState extends State<ChatScreen> {
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(12),
             ),
-            color: Colors.white,
+            color: _currentTheme.containerColor,
             elevation: 6,
             itemBuilder: (context) => [
-              const PopupMenuItem(
+              PopupMenuItem(
                 value: 'new_chat',
                 child: Row(
                   children: [
-                    Icon(Icons.chat_bubble_outline, color: Color.fromARGB(255, 66, 6, 230)),
-                    SizedBox(width: 8),
-                    Text('New Chat'),
+                    Icon(Icons.chat_bubble_outline, color: _currentTheme.primary),
+                    const SizedBox(width: 8),
+                    const Text('New Chat'),
                   ],
                 ),
               ),
-              const PopupMenuItem(
+              PopupMenuItem(
                 value: 'history',
                 child: Row(
                   children: [
-                    Icon(Icons.history, color: Color.fromARGB(255, 66, 6, 230)),
-                    SizedBox(width: 8),
-                    Text('Chat History'),
+                    Icon(Icons.history, color: _currentTheme.primary),
+                    const SizedBox(width: 8),
+                    const Text('Chat History'),
                   ],
                 ),
               ),
@@ -491,9 +507,9 @@ class _ChatScreenState extends State<ChatScreen> {
         ],
       ),
       body: Container(
-        decoration: const BoxDecoration(
+        decoration: BoxDecoration(
           gradient: LinearGradient(
-            colors: [Color(0xFF90CAF9), Color(0xFFBAE0FF)],
+            colors: [_currentTheme.gradientStart, _currentTheme.gradientEnd],
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
           ),
@@ -517,11 +533,11 @@ class _ChatScreenState extends State<ChatScreen> {
                           horizontal: 16, vertical: 12),
                       decoration: BoxDecoration(
                         color: message.isUser
-                            ? const Color(0xFF2196F3)
-                            : Colors.white70,
+                            ? _currentTheme.primary
+                            : _currentTheme.containerColor,
                         borderRadius: BorderRadius.circular(16),
                         border: Border.all(
-                          color: Colors.blueAccent.withOpacity(0.5),
+                          color: _currentTheme.primary.withOpacity(0.5),
                           width: 1,
                         ),
                         boxShadow: [
@@ -536,7 +552,7 @@ class _ChatScreenState extends State<ChatScreen> {
                         message.text,
                         style: TextStyle(
                           color: message.isUser
-                              ? Colors.white
+                              ? Colors.black
                               : Colors.black87,
                           fontSize: 16,
                         ),
@@ -548,43 +564,66 @@ class _ChatScreenState extends State<ChatScreen> {
             ),
 
             if (isLoading)
-              const Padding(
-                padding: EdgeInsets.symmetric(vertical: 8),
-                child: CircularProgressIndicator(),
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                child: Column(
+                  children: [
+                    CircularProgressIndicator(
+                      color: _currentTheme.primary,
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Ikri is typing...',
+                      style: TextStyle(
+                        color: _currentTheme.primary,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ),
               ),
 
             // 🔹 Input Box
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              color: Colors.white,
+              color: _currentTheme.containerColor,
               child: Row(
                 children: [
                   Expanded(
                     child: TextField(
                       controller: _controller,
-                      decoration: const InputDecoration(
+                      decoration: InputDecoration(
                         hintText: "Type your message here...",
+                        hintStyle: TextStyle(color: Colors.black54),
                         border: InputBorder.none,
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 16),
                       ),
+                      style: const TextStyle(color: Colors.black87),
                       onSubmitted: sendMessage,
                     ),
                   ),
-                  IconButton(
-                    icon: const Icon(Icons.send, color: Colors.blueAccent),
-                    onPressed: () => sendMessage(_controller.text),
+                  Container(
+                    decoration: BoxDecoration(
+                      color: _currentTheme.primary,
+                      shape: BoxShape.circle,
+                    ),
+                    child: IconButton(
+                      icon: const Icon(Icons.send, color: Colors.black),
+                      onPressed: () => sendMessage(_controller.text),
+                    ),
                   ),
                 ],
               ),
             ),
 
-            // 🔹 Bottom Navigation Bar
+            // 🔹 Bottom Navigation Bar with theme colors
             Container(
               padding: const EdgeInsets.symmetric(vertical: 10),
-              decoration: const BoxDecoration(
+              decoration: BoxDecoration(
                 border: Border(
-                  top: BorderSide(color: Colors.blue, width: 2),
+                  top: BorderSide(color: _currentTheme.primary, width: 2),
                 ),
-                color: Color(0xFF2196F3),
+                color: _currentTheme.primary,
               ),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceAround,

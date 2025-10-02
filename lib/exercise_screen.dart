@@ -7,11 +7,14 @@ import 'package:firebase_database/firebase_database.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'home_screen.dart';
+import 'chat_sceen.dart';
+import 'theme_manager.dart'; // Theme manager import করুন
 
 class RecommendationsScreen extends StatefulWidget {
+  final Map<String, dynamic> p_userData;
   final String userId;
 
-  const RecommendationsScreen({super.key, required this.userId});
+  const RecommendationsScreen({super.key, required this.p_userData, required this.userId});
 
   @override
   State<RecommendationsScreen> createState() => _RecommendationsScreenState();
@@ -34,7 +37,7 @@ class _RecommendationsScreenState extends State<RecommendationsScreen> {
 
   // API Keys
   final String googleBooksApiKey = 'AIzaSyDXx4LY3ANAyAQFJhtixpugNAwEpKBzCfo';
-  final String geminiApiKey = 'AIzaSyBSx-y5UfkQ8XlFGjFB5jDJHkmWI0Is-wQ'; // Updated API key
+  final String geminiApiKey = 'AIzaSyBSx-y5UfkQ8XlFGjFB5jDJHkmWI0Is-wQ';
   
   // Spotify credentials
   final String spotifyClientId = '58e043478b674da8ba95b5b98ec53663';
@@ -47,21 +50,32 @@ class _RecommendationsScreenState extends State<RecommendationsScreen> {
   // Track current section
   int _currentSection = 0;
 
+  // Theme variables
+  int _currentThemeIndex = 0;
+  ColorTheme _currentTheme = ThemeManager.colorThemes[0];
 
-// widget load hoyar somoy firebase initialize r profile data fetch kolam
   @override
   void initState() {
     super.initState();
+    _loadTheme();
     _initializeFirebase();
     _fetchUserProfileData();
   }
-//audio player off 
+
   @override
   void dispose() {
     audioPlayer.dispose();
     super.dispose();
   }
-//start firebase services
+
+  Future<void> _loadTheme() async {
+    final themeIndex = await ThemeManager.getSelectedThemeIndex();
+    setState(() {
+      _currentThemeIndex = themeIndex;
+      _currentTheme = ThemeManager.getCurrentTheme(themeIndex);
+    });
+  }
+
   Future<void> _initializeFirebase() async {
     try {
       await Firebase.initializeApp();
@@ -76,21 +90,18 @@ class _RecommendationsScreenState extends State<RecommendationsScreen> {
 
   Future<void> _fetchUserData() async {
     try {
-      // Try to get data from Firestore first
       final DocumentSnapshot firestoreSnapshot = 
           await firestore.collection('userAnalysis').doc(widget.userId).get();
       
       if (firestoreSnapshot.exists) {
         setState(() {
           userData = firestoreSnapshot.data() as Map<String, dynamic>;
-          print(userData);
         });
         await _getSpotifyAccessToken();
         _fetchRecommendations();
         return;
       }
       
-      // If not in Firestore, try Realtime Database
       final DataSnapshot realtimeSnapshot = 
           await realtimeDbRef.child('userAnalysis').child(widget.userId).get();
       
@@ -103,16 +114,15 @@ class _RecommendationsScreenState extends State<RecommendationsScreen> {
         return;
       }
       
-      // If no data found
       setState(() {
         errorMessage = 'No user data found for analysis';
         isLoading = false;
       });
 
       final profileData = await _fetchUserProfileData();
-    setState(() {
-      userProfileData = profileData;
-    });
+      setState(() {
+        userProfileData = profileData;
+      });
     } catch (e) {
       setState(() {
         errorMessage = 'Failed to load user data: $e';
@@ -120,34 +130,29 @@ class _RecommendationsScreenState extends State<RecommendationsScreen> {
       });
     }
   }
+
   Future<Map<String, dynamic>> _fetchUserProfileData() async {
-  try {
-    final DocumentSnapshot userDoc = 
-        await firestore.collection('users').doc(widget.userId).get();
-    
-    if (userDoc.exists) {
-      final userData = userDoc.data() as Map<String, dynamic>;
-      print('User profile data fetched: $userData');
-      return userData;
+    try {
+      final DocumentSnapshot userDoc = 
+          await firestore.collection('users').doc(widget.userId).get();
+      
+      if (userDoc.exists) {
+        return userDoc.data() as Map<String, dynamic>;
+      }
+      
+      final DataSnapshot realtimeSnapshot = 
+          await realtimeDbRef.child('users').child(widget.userId).get();
+      
+      if (realtimeSnapshot.exists) {
+        return Map<String, dynamic>.from(realtimeSnapshot.value as Map);
+      }
+      
+      return {};
+    } catch (e) {
+      return {};
     }
-    
-    final DataSnapshot realtimeSnapshot = 
-        await realtimeDbRef.child('users').child(widget.userId).get();
-    
-    if (realtimeSnapshot.exists) {
-      final userData = Map<String, dynamic>.from(realtimeSnapshot.value as Map);
-      print('User profile data fetched from RTDB: $userData');
-      return userData;
-    }
-    
-    print('No user profile data found for user: ${widget.userId}');
-    return {};
-    
-  } catch (e) {
-    print('Error fetching user profile data: $e');
-    return {};
   }
-}
+
   Future<void> _getSpotifyAccessToken() async {
     try {
       final response = await http.post(
@@ -166,9 +171,6 @@ class _RecommendationsScreenState extends State<RecommendationsScreen> {
         setState(() {
           spotifyAccessToken = data['access_token'];
         });
-      } else {
-        print('Failed to get Spotify access token: ${response.statusCode}');
-        print('Response body: ${response.body}');
       }
     } catch (e) {
       print('Error getting Spotify token: $e');
@@ -177,7 +179,6 @@ class _RecommendationsScreenState extends State<RecommendationsScreen> {
 
   Future<void> _fetchRecommendations() async {
     try {
-      // Generate recommendations based on user data
       final bookRecs = await _getBookRecommendations();
       final exerciseRecs = await _getExerciseRecommendations();
       final songRecs = await _getSongRecommendations();
@@ -197,10 +198,7 @@ class _RecommendationsScreenState extends State<RecommendationsScreen> {
   }
 
   Future<List<dynamic>> _getBookRecommendations() async {
-    // Extract key themes from user data for book search
     final themes = _extractThemesFromUserData();
-    
-    // For each theme, search for relevant books
     List<dynamic> allBooks = [];
     
     for (String theme in themes) {
@@ -216,7 +214,6 @@ class _RecommendationsScreenState extends State<RecommendationsScreen> {
       }
     }
     
-    // Remove duplicates
     final seenIds = <String>{};
     allBooks.retainWhere((book) => seenIds.add(book['id']));
     
@@ -224,7 +221,6 @@ class _RecommendationsScreenState extends State<RecommendationsScreen> {
   }
 
   Future<List<dynamic>> _getExerciseRecommendations() async {
-    // Use Gemini API to generate personalized exercises
     final prompt = _createExercisePrompt();
     
     final response = await http.post(
@@ -242,8 +238,6 @@ class _RecommendationsScreenState extends State<RecommendationsScreen> {
     if (response.statusCode == 200) {
       final data = json.decode(response.body);
       final text = data['candidates'][0]['content']['parts'][0]['text'];
-      
-      // Parse the response to extract exercises
       return _parseExerciseResponse(text);
     } else {
       throw Exception('Failed to get exercise recommendations');
@@ -252,15 +246,12 @@ class _RecommendationsScreenState extends State<RecommendationsScreen> {
 
   Future<List<dynamic>> _getSongRecommendations() async {
     try {
-      // First, use Gemini API to generate personalized song recommendations
       final geminiSongRecs = await _getGeminiSongRecommendations();
       
       if (spotifyAccessToken == null) {
-        print('No Spotify access token available, using Gemini recommendations');
         return geminiSongRecs;
       }
       
-      // Try to search for these songs on Spotify
       final List<dynamic> spotifySongs = [];
       
       for (final song in geminiSongRecs) {
@@ -278,20 +269,15 @@ class _RecommendationsScreenState extends State<RecommendationsScreen> {
           }
         }
         
-        // Limit to 6 songs
         if (spotifySongs.length >= 6) break;
       }
       
-      // If we found Spotify songs, return them
       if (spotifySongs.isNotEmpty) {
         return spotifySongs;
       }
       
-      // Otherwise return the Gemini recommendations
       return geminiSongRecs;
-      
     } catch (e) {
-      print('Error getting song recommendations: $e');
       return _getFallbackSongs();
     }
   }
@@ -314,12 +300,8 @@ class _RecommendationsScreenState extends State<RecommendationsScreen> {
     if (response.statusCode == 200) {
       final data = json.decode(response.body);
       final text = data['candidates'][0]['content']['parts'][0]['text'];
-      
-      // Parse the response to extract song recommendations
       return _parseMusicResponse(text);
     } else {
-      print('Gemini API error: ${response.statusCode}');
-      print('Response body: ${response.body}');
       return _getFallbackSongs();
     }
   }
@@ -328,7 +310,6 @@ class _RecommendationsScreenState extends State<RecommendationsScreen> {
     if (spotifyAccessToken == null) return null;
     
     try {
-      // Build search query
       String query = 'track:$songName';
       if (artistName.isNotEmpty) {
         query += ' artist:$artistName';
@@ -353,7 +334,7 @@ class _RecommendationsScreenState extends State<RecommendationsScreen> {
         final tracks = data['tracks']['items'];
         
         if (tracks != null && tracks.isNotEmpty) {
-          return tracks[0]; // Return the first matching track
+          return tracks[0];
         }
       }
     } catch (e) {
@@ -364,7 +345,6 @@ class _RecommendationsScreenState extends State<RecommendationsScreen> {
   }
 
   List<dynamic> _getFallbackSongs() {
-    // Return fallback songs if APIs fail
     return [
       {
         'title': 'Calm Meditation',
@@ -380,20 +360,12 @@ class _RecommendationsScreenState extends State<RecommendationsScreen> {
         'image': 'https://placehold.co/150x150/2196F3/white?text=Relaxation',
         'preview_url': 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3',
       },
-      {
-        'title': 'Stress Relief',
-        'artist': 'Calming Waves',
-        'description': 'Music to relieve stress and anxiety',
-        'image': 'https://placehold.co/150x150/2196F3/white?text=Calm',
-        'preview_url': 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-3.mp3',
-      },
     ];
   }
 
   List<String> _extractThemesFromUserData() {
     final themes = <String>[];
     
-    // Extract themes from mental condition
     if (userData['mental_condition'] != null) {
       final mentalCondition = userData['mental_condition'];
       
@@ -414,7 +386,6 @@ class _RecommendationsScreenState extends State<RecommendationsScreen> {
       }
     }
     
-    // Extract from interests
     if (userData['interests'] != null) {
       final interests = userData['interests'];
       if (interests['topics'] != null) {
@@ -422,12 +393,8 @@ class _RecommendationsScreenState extends State<RecommendationsScreen> {
         if (interests['topics'].toString().contains('mental health')) themes.add('mental health');
         if (interests['topics'].toString().contains('conflict resolution')) themes.add('conflict resolution');
       }
-      if (interests['medication'] != null) {
-        themes.add('mental health medication');
-      }
     }
     
-    // Extract from dislikes
     if (userData['dislikes'] != null) {
       final dislikes = userData['dislikes'];
       if (dislikes['situations']?.toString().contains('bored') ?? false) {
@@ -438,7 +405,6 @@ class _RecommendationsScreenState extends State<RecommendationsScreen> {
       }
     }
     
-    // Extract from preferences
     if (userData['preferences'] != null) {
       final preferences = userData['preferences'];
       if (preferences['other']?.toString().contains('friendship recovery') ?? false) {
@@ -446,7 +412,6 @@ class _RecommendationsScreenState extends State<RecommendationsScreen> {
       }
     }
     
-    // Add some default themes if not enough
     if (themes.length < 3) {
       themes.addAll(['mindfulness', 'emotional wellness', 'self-care']);
     }
@@ -471,7 +436,7 @@ Provide the response in valid JSON format only.
   }
 
   String _createMusicPrompt() {
-  return """
+    return """
 Based on the following user profile, suggest 10 personalized songs for mental health and emotional well-being.
 Return ONLY a valid JSON array with each song object having exactly these fields: title, artist, description.
 
@@ -495,18 +460,15 @@ User Profile:
 
 Focus on songs that would help with the user's specific mental health needs.
 """;
-}
+  }
 
   List<dynamic> _parseExerciseResponse(String text) {
     try {
-      // Extract JSON from the response
       final startIndex = text.indexOf('[');
       final endIndex = text.lastIndexOf(']') + 1;
       final jsonString = text.substring(startIndex, endIndex);
-      
       return json.decode(jsonString);
     } catch (e) {
-      // Fallback exercises if parsing fails
       return [
         {
           'title': 'Deep Breathing',
@@ -525,143 +487,42 @@ Focus on songs that would help with the user's specific mental health needs.
   }
 
   List<dynamic> _parseMusicResponse(String text) {
-  try {
-    // First, try to find JSON array in the response
-    final jsonPattern = RegExp(r'\[.*\]', multiLine: true, dotAll: true);
-    final match = jsonPattern.firstMatch(text);
-    
-    if (match != null) {
-      final jsonString = match.group(0);
-      return json.decode(jsonString!);
-    }
-    
-    // If no JSON array found, try to find JSON object
-    final objectPattern = RegExp(r'\{.*\}', multiLine: true, dotAll: true);
-    final objectMatch = objectPattern.firstMatch(text);
-    
-    if (objectMatch != null) {
-      final jsonString = objectMatch.group(0);
-      final jsonObject = json.decode(jsonString!);
+    try {
+      final jsonPattern = RegExp(r'\[.*\]', multiLine: true, dotAll: true);
+      final match = jsonPattern.firstMatch(text);
       
-      // Check if it's a single song object
-      if (jsonObject is Map<String, dynamic>) {
-        if (jsonObject.containsKey('title') || jsonObject.containsKey('name')) {
-          return [jsonObject];
-        }
+      if (match != null) {
+        final jsonString = match.group(0);
+        return json.decode(jsonString!);
       }
+      
+      return _getFallbackSongs();
+    } catch (e) {
+      return _getFallbackSongs();
     }
-    
-    // If no valid JSON found, try to extract songs from text response
-    return _extractSongsFromText(text);
-    
-  } catch (e) {
-    print('Error parsing music response: $e');
-    print('Response text: $text');
-    return _getFallbackSongs();
   }
-}
-
-List<dynamic> _extractSongsFromText(String text) {
-  final List<dynamic> songs = [];
-  
-  try {
-    // Try to extract song information using patterns
-    final lines = text.split('\n');
-    
-    for (final line in lines) {
-      if (line.contains('title') || line.contains('artist') || 
-          line.contains('"title"') || line.contains('"artist"')) {
-        
-        // Try to extract JSON-like objects from the line
-        final objectPattern = RegExp(r'\{[^}]+\}');
-        final matches = objectPattern.allMatches(line);
-        
-        for (final match in matches) {
-          try {
-            final jsonString = match.group(0);
-            final songData = json.decode(jsonString!);
-            
-            if (songData is Map<String, dynamic> && 
-                (songData.containsKey('title') || songData.containsKey('name'))) {
-              songs.add(songData);
-            }
-          } catch (e) {
-            // Ignore parsing errors for individual matches
-          }
-        }
-      }
-    }
-    
-    // If we found some songs, return them
-    if (songs.isNotEmpty) {
-      return songs;
-    }
-    
-    // Fallback: manually extract song information
-    final songTitles = <String>[];
-    final songArtists = <String>[];
-    
-    // Look for patterns that might indicate song titles and artists
-    for (final line in lines) {
-      if (line.contains('"') || line.contains('-')) {
-        // This might be a song line
-        final titleMatch = RegExp(r'"([^"]+)"').firstMatch(line);
-        if (titleMatch != null) {
-          songTitles.add(titleMatch.group(1)!);
-        }
-        
-        final artistMatch = RegExp(r'by\s+([^,\.]+)').firstMatch(line);
-        if (artistMatch != null) {
-          songArtists.add(artistMatch.group(1)!);
-        }
-      }
-    }
-    
-    // Create song objects from extracted data
-    for (int i = 0; i < songTitles.length; i++) {
-      songs.add({
-        'title': songTitles[i],
-        'artist': i < songArtists.length ? songArtists[i] : 'Unknown Artist',
-        'description': 'Recommended based on your mental health needs',
-        'image': 'https://placehold.co/150x150/2196F3/white?text=Music',
-        'preview_url': 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-${i + 1}.mp3',
-      });
-    }
-    
-    if (songs.isNotEmpty) {
-      return songs;
-    }
-    
-  } catch (e) {
-    print('Error extracting songs from text: $e');
-  }
-  
-  return _getFallbackSongs();
-}
 
   void _openBookPreview(book) {
-    // Extract preview link if available
     final previewLink = book['volumeInfo']?['previewLink'];
     final title = book['volumeInfo']?['title'] ?? 'Book Preview';
     
     if (previewLink != null) {
-      // Navigate to the book preview screen
       Navigator.pushNamed(
         context, 
         '/book_preview', 
         arguments: {'url': previewLink, 'title': title}
       );
     } else {
-      // Show a dialog if no preview is available
       showDialog(
         context: context,
         builder: (context) => AlertDialog(
+          backgroundColor: _currentTheme.containerColor,
           title: const Text('Preview Not Available'),
           content: Text('Sorry, no preview is available for "$title".'),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(context),
-              child: const Text('OK'),
+              child: Text('OK', style: TextStyle(color: _currentTheme.primary)),
             )
           ],
         ),
@@ -674,19 +535,19 @@ List<dynamic> _extractSongsFromText(String text) {
     final songName = song['name'] ?? 'Song';
     
     if (spotifyUrl != null) {
-      // Use url_launcher to open the URL
       if (await canLaunchUrl(Uri.parse(spotifyUrl))) {
         await launchUrl(Uri.parse(spotifyUrl));
       } else {
         showDialog(
           context: context,
           builder: (context) => AlertDialog(
+            backgroundColor: _currentTheme.containerColor,
             title: Text('Cannot Open $songName'),
             content: const Text('Please install Spotify to open this song.'),
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(context),
-                child: const Text('OK'),
+                child: Text('OK', style: TextStyle(color: _currentTheme.primary)),
               )
             ],
           ),
@@ -696,12 +557,13 @@ List<dynamic> _extractSongsFromText(String text) {
       showDialog(
         context: context,
         builder: (context) => AlertDialog(
+          backgroundColor: _currentTheme.containerColor,
           title: const Text('No Spotify Link Available'),
           content: Text('Sorry, no Spotify link is available for "$songName".'),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(context),
-              child: const Text('OK'),
+              child: Text('OK', style: TextStyle(color: _currentTheme.primary)),
             )
           ],
         ),
@@ -714,12 +576,13 @@ List<dynamic> _extractSongsFromText(String text) {
       showDialog(
         context: context,
         builder: (context) => AlertDialog(
+          backgroundColor: _currentTheme.containerColor,
           title: const Text('Preview Not Available'),
           content: const Text('Sorry, no preview is available for this song.'),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(context),
-              child: const Text('OK'),
+              child: Text('OK', style: TextStyle(color: _currentTheme.primary)),
             )
           ],
         ),
@@ -728,19 +591,16 @@ List<dynamic> _extractSongsFromText(String text) {
     }
 
     if (currentlyPlayingIndex == index && playerState == PlayerState.playing) {
-      // Pause if this song is already playing
       await audioPlayer.pause();
       setState(() {
         playerState = PlayerState.paused;
       });
     } else if (currentlyPlayingIndex == index && playerState == PlayerState.paused) {
-      // Resume if this song is paused
       await audioPlayer.resume();
       setState(() {
         playerState = PlayerState.playing;
       });
     } else {
-      // Stop any currently playing song and play this one
       if (currentlyPlayingIndex != null) {
         await audioPlayer.stop();
       }
@@ -751,7 +611,6 @@ List<dynamic> _extractSongsFromText(String text) {
         playerState = PlayerState.playing;
       });
       
-      // Listen for completion
       audioPlayer.onPlayerComplete.listen((event) {
         setState(() {
           playerState = PlayerState.stopped;
@@ -761,7 +620,6 @@ List<dynamic> _extractSongsFromText(String text) {
     }
   }
 
-  // Helper method to safely extract artist names
   String _getArtistNames(dynamic artistsData) {
     if (artistsData == null) return 'Unknown Artist';
     
@@ -776,12 +634,10 @@ List<dynamic> _extractSongsFromText(String text) {
       }
       return 'Unknown Artist';
     } catch (e) {
-      print('Error parsing artists: $e');
       return 'Unknown Artist';
     }
   }
 
-  // Helper method to safely extract image URL
   String _getImageUrl(dynamic albumData) {
     if (albumData == null) return '';
     
@@ -797,7 +653,6 @@ List<dynamic> _extractSongsFromText(String text) {
       }
       return '';
     } catch (e) {
-      print('Error parsing image URL: $e');
       return '';
     }
   }
@@ -805,290 +660,312 @@ List<dynamic> _extractSongsFromText(String text) {
   Widget _buildContent() {
     switch (_currentSection) {
       case 0:
-        return ListView.builder(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-          itemCount: bookRecommendations.length,
-          itemBuilder: (context, index) {
-            final book = bookRecommendations[index];
-            final volumeInfo = book['volumeInfo'];
-            final title = volumeInfo?['title'] ?? 'Unknown Title';
-            final authors = volumeInfo?['authors'] != null 
-                ? volumeInfo['authors'].join(', ') 
-                : 'Unknown Author';
-            final thumbnail = volumeInfo?['imageLinks']?['thumbnail'] ?? '';
-            
-            return Padding(
-              padding: const EdgeInsets.only(bottom: 16.0),
-              child: Container(
-                decoration: BoxDecoration(
-                  color: Colors.white70,
-                  borderRadius: BorderRadius.circular(12),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.1),
-                      blurRadius: 4,
-                      offset: const Offset(0, 2),
-                    ),
-                  ],
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: [
-                    if (thumbnail.isNotEmpty)
-                      ClipRRect(
-                        borderRadius: const BorderRadius.only(
-                          topLeft: Radius.circular(12),
-                          topRight: Radius.circular(12),
-                        ),
-                        child: Image.network(
-                          thumbnail,
-                          height: 180,
-                          width: double.infinity,
-                          fit: BoxFit.cover,
-                        ),
-                      )
-                    else
-                      Container(
-                        height: 180,
-                        width: double.infinity,
-                        color: Colors.grey[300],
-                        child: const Icon(Icons.book, size: 60, color: Colors.grey),
-                      ),
-                    const SizedBox(height: 8),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 12.0),
-                      child: Text(
-                        title,
-                        style: const TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.black87,
-                        ),
-                        textAlign: TextAlign.center,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 12.0),
-                      child: Text(
-                        authors,
-                        style: TextStyle(
-                          fontSize: 14,
-                          color: Colors.grey[700],
-                        ),
-                        textAlign: TextAlign.center,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.blueAccent,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                      ),
-                      onPressed: () {
-                        _openBookPreview(book);
-                      },
-                      child: const Text("Read Preview"),
-                    ),
-                    const SizedBox(height: 12),
-                  ],
-                ),
-              ),
-            );
-          },
-        );
+        return _buildBooksSection();
       case 1:
-        return ListView.builder(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-          itemCount: exerciseRecommendations.length,
-          itemBuilder: (context, index) {
-            final exercise = exerciseRecommendations[index];
-            
-            return Padding(
-              padding: const EdgeInsets.only(bottom: 16.0),
-              child: Container(
-                decoration: BoxDecoration(
-                  color: Colors.white70,
-                  borderRadius: BorderRadius.circular(12),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.1),
-                      blurRadius: 4,
-                      offset: const Offset(0, 2),
-                    ),
-                  ],
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.all(16.0),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        exercise['title'] ?? 'Exercise',
-                        style: const TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.black87,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        exercise['description'] ?? '',
-                        style: TextStyle(
-                          fontSize: 14,
-                          color: Colors.grey[700],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            );
-          },
-        );
+        return _buildExercisesSection();
       case 2:
-        return ListView.builder(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-          itemCount: songRecommendations.length,
-          itemBuilder: (context, index) {
-            final song = songRecommendations[index];
-            final title = song['name']?.toString() ?? song['title']?.toString() ?? 'Unknown Song';
-            final artists = song['artists'] != null 
-                ? _getArtistNames(song['artists']) 
-                : song['artist']?.toString() ?? 'Unknown Artist';
-            final thumbnail = song['album'] != null 
-                ? _getImageUrl(song['album']) 
-                : song['image']?.toString() ?? '';
-            final previewUrl = song['preview_url']?.toString() ?? '';
-            
-            return Padding(
-              padding: const EdgeInsets.only(bottom: 16.0),
-              child: Container(
-                decoration: BoxDecoration(
-                  color: Colors.white70,
-                  borderRadius: BorderRadius.circular(12),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.1),
-                      blurRadius: 4,
-                      offset: const Offset(0, 2),
-                    ),
-                  ],
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: [
-                    if (thumbnail.isNotEmpty)
-                      ClipRRect(
-                        borderRadius: const BorderRadius.only(
-                          topLeft: Radius.circular(12),
-                          topRight: Radius.circular(12),
-                        ),
-                        child: Image.network(
-                          thumbnail,
-                          height: 180,
-                          width: double.infinity,
-                          fit: BoxFit.cover,
-                          errorBuilder: (context, error, stackTrace) {
-                            return Container(
-                              height: 180,
-                              width: double.infinity,
-                              color: Colors.grey[300],
-                              child: const Icon(Icons.music_note, size: 60, color: Color.fromARGB(255, 9, 201, 57)),
-                            );
-                          },
-                        ),
-                      )
-                    else
-                      Container(
-                        height: 180,
-                        width: double.infinity,
-                        color: Colors.grey[300],
-                        child: const Icon(Icons.music_note, size: 60, color: Color.fromARGB(255, 9, 201, 57)),
-                      ),
-                    const SizedBox(height: 8),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 12.0),
-                      child: Text(
-                        title,
-                        style: const TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.black87,
-                        ),
-                        textAlign: TextAlign.center,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 12.0),
-                      child: Text(
-                        artists,
-                        style: TextStyle(
-                          fontSize: 14,
-                          color: Colors.grey[700],
-                        ),
-                        textAlign: TextAlign.center,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        // Play/Pause button
-                        IconButton(
-                          icon: Icon(
-                            currentlyPlayingIndex == index && playerState == PlayerState.playing 
-                                ? Icons.pause_circle_filled 
-                                : Icons.play_circle_filled,
-                            size: 36,
-                            color: Colors.green,
-                          ),
-                          onPressed: () => _playPauseSong(index, previewUrl),
-                        ),
-                        // Spotify button (only show if it's a Spotify song)
-                        if (song['external_urls'] != null)
-                        IconButton(
-                          icon: const Icon(
-                            Icons.open_in_new,
-                            size: 30,
-                            color: Colors.green,
-                          ),
-                          onPressed: () {
-                            _openSpotifySong(song);
-                          },
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                  ],
-                ),
-              ),
-            );
-          },
-        );
+        return _buildMusicSection();
       default:
         return Container();
     }
+  }
+
+  Widget _buildBooksSection() {
+    return ListView.builder(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+      itemCount: bookRecommendations.length,
+      itemBuilder: (context, index) {
+        final book = bookRecommendations[index];
+        final volumeInfo = book['volumeInfo'];
+        final title = volumeInfo?['title'] ?? 'Unknown Title';
+        final authors = volumeInfo?['authors'] != null 
+            ? volumeInfo['authors'].join(', ') 
+            : 'Unknown Author';
+        final thumbnail = volumeInfo?['imageLinks']?['thumbnail'] ?? '';
+        
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 16.0),
+          child: Container(
+            decoration: BoxDecoration(
+              color: _currentTheme.containerColor,
+              borderRadius: BorderRadius.circular(12),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.1),
+                  blurRadius: 4,
+                  offset: const Offset(0, 2),
+                ),
+              ],
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                if (thumbnail.isNotEmpty)
+                  ClipRRect(
+                    borderRadius: const BorderRadius.only(
+                      topLeft: Radius.circular(12),
+                      topRight: Radius.circular(12),
+                    ),
+                    child: Image.network(
+                      thumbnail,
+                      height: 180,
+                      width: double.infinity,
+                      fit: BoxFit.cover,
+                    ),
+                  )
+                else
+                  Container(
+                    height: 180,
+                    width: double.infinity,
+                    color: Colors.grey[300],
+                    child: Icon(Icons.book, size: 60, color: _currentTheme.primary),
+                  ),
+                const SizedBox(height: 8),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 12.0),
+                  child: Text(
+                    title,
+                    style: const TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.black87,
+                    ),
+                    textAlign: TextAlign.center,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 12.0),
+                  child: Text(
+                    authors,
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: Colors.grey[700],
+                    ),
+                    textAlign: TextAlign.center,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: _currentTheme.primary,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                  onPressed: () {
+                    _openBookPreview(book);
+                  },
+                  child: const Text("Read Preview"),
+                ),
+                const SizedBox(height: 12),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildExercisesSection() {
+    return ListView.builder(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+      itemCount: exerciseRecommendations.length,
+      itemBuilder: (context, index) {
+        final exercise = exerciseRecommendations[index];
+        
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 16.0),
+          child: Container(
+            decoration: BoxDecoration(
+              color: _currentTheme.containerColor,
+              borderRadius: BorderRadius.circular(12),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.1),
+                  blurRadius: 4,
+                  offset: const Offset(0, 2),
+                ),
+              ],
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    exercise['title'] ?? 'Exercise',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: _currentTheme.primary,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    exercise['description'] ?? '',
+                    style: const TextStyle(
+                      fontSize: 14,
+                      color: Colors.black87,
+                    ),
+                  ),
+                  if (exercise['duration'] != null) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      'Duration: ${exercise['duration']}',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: _currentTheme.primary,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildMusicSection() {
+    return ListView.builder(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+      itemCount: songRecommendations.length,
+      itemBuilder: (context, index) {
+        final song = songRecommendations[index];
+        final title = song['name']?.toString() ?? song['title']?.toString() ?? 'Unknown Song';
+        final artists = song['artists'] != null 
+            ? _getArtistNames(song['artists']) 
+            : song['artist']?.toString() ?? 'Unknown Artist';
+        final thumbnail = song['album'] != null 
+            ? _getImageUrl(song['album']) 
+            : song['image']?.toString() ?? '';
+        final previewUrl = song['preview_url']?.toString() ?? '';
+        
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 16.0),
+          child: Container(
+            decoration: BoxDecoration(
+              color: _currentTheme.containerColor,
+              borderRadius: BorderRadius.circular(12),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.1),
+                  blurRadius: 4,
+                  offset: const Offset(0, 2),
+                ),
+              ],
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                if (thumbnail.isNotEmpty)
+                  ClipRRect(
+                    borderRadius: const BorderRadius.only(
+                      topLeft: Radius.circular(12),
+                      topRight: Radius.circular(12),
+                    ),
+                    child: Image.network(
+                      thumbnail,
+                      height: 180,
+                      width: double.infinity,
+                      fit: BoxFit.cover,
+                      errorBuilder: (context, error, stackTrace) {
+                        return Container(
+                          height: 180,
+                          width: double.infinity,
+                          color: Colors.grey[300],
+                          child: Icon(Icons.music_note, size: 60, color: _currentTheme.primary),
+                        );
+                      },
+                    ),
+                  )
+                else
+                  Container(
+                    height: 180,
+                    width: double.infinity,
+                    color: Colors.grey[300],
+                    child: Icon(Icons.music_note, size: 60, color: _currentTheme.primary),
+                  ),
+                const SizedBox(height: 8),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 12.0),
+                  child: Text(
+                    title,
+                    style: const TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.black87,
+                    ),
+                    textAlign: TextAlign.center,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 12.0),
+                  child: Text(
+                    artists,
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: Colors.grey[700],
+                    ),
+                    textAlign: TextAlign.center,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    IconButton(
+                      icon: Icon(
+                        currentlyPlayingIndex == index && playerState == PlayerState.playing 
+                            ? Icons.pause_circle_filled 
+                            : Icons.play_circle_filled,
+                        size: 36,
+                        color: _currentTheme.primary,
+                      ),
+                      onPressed: () => _playPauseSong(index, previewUrl),
+                    ),
+                    if (song['external_urls'] != null)
+                      IconButton(
+                        icon: Icon(
+                          Icons.open_in_new,
+                          size: 30,
+                          color: _currentTheme.primary,
+                        ),
+                        onPressed: () {
+                          _openSpotifySong(song);
+                        },
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+              ],
+            ),
+          ),
+        );
+      },
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       body: Container(
-        decoration: const BoxDecoration(
+        decoration: BoxDecoration(
           gradient: LinearGradient(
-            colors: [Color(0xFF90CAF9), Color(0xFFBAE0FF)],
+            colors: [_currentTheme.gradientStart, _currentTheme.gradientEnd],
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
           ),
@@ -1096,13 +973,13 @@ List<dynamic> _extractSongsFromText(String text) {
         child: SafeArea(
           child: Column(
             children: [
-              // Top Container
+              // Top Container with theme colors
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                decoration: const BoxDecoration(
-                  color: Color(0xFF2196F3),
+                decoration: BoxDecoration(
+                  color: _currentTheme.primary,
                   border: Border(
-                    bottom: BorderSide(color: Colors.blue, width: 2),
+                    bottom: BorderSide(color: _currentTheme.primary, width: 2),
                   ),
                 ),
                 child: Row(
@@ -1134,7 +1011,7 @@ List<dynamic> _extractSongsFromText(String text) {
 
               const SizedBox(height: 16),
 
-              // Section Buttons
+              // Section Buttons with theme colors
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16.0),
                 child: Row(
@@ -1143,7 +1020,7 @@ List<dynamic> _extractSongsFromText(String text) {
                     Expanded(
                       child: ElevatedButton(
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: _currentSection == 0 ? Colors.blueAccent : Colors.white,
+                          backgroundColor: _currentSection == 0 ? _currentTheme.primary : Colors.white,
                           foregroundColor: _currentSection == 0 ? Colors.white : Colors.black,
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(8),
@@ -1154,7 +1031,7 @@ List<dynamic> _extractSongsFromText(String text) {
                             _currentSection = 0;
                           });
                         },
-                                                child: const Text(
+                        child: const Text(
                           'Books',
                           textAlign: TextAlign.center,
                           style: TextStyle(fontSize: 14),
@@ -1165,7 +1042,7 @@ List<dynamic> _extractSongsFromText(String text) {
                     Expanded(
                       child: ElevatedButton(
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: _currentSection == 1 ? Colors.blueAccent : Colors.white,
+                          backgroundColor: _currentSection == 1 ? _currentTheme.primary : Colors.white,
                           foregroundColor: _currentSection == 1 ? Colors.white : Colors.black,
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(8),
@@ -1187,7 +1064,7 @@ List<dynamic> _extractSongsFromText(String text) {
                     Expanded(
                       child: ElevatedButton(
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: _currentSection == 2 ? Colors.blueAccent : Colors.white,
+                          backgroundColor: _currentSection == 2 ? _currentTheme.primary : Colors.white,
                           foregroundColor: _currentSection == 2 ? Colors.white : Colors.black,
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(8),
@@ -1220,7 +1097,10 @@ List<dynamic> _extractSongsFromText(String text) {
               else if (errorMessage != null)
                 Expanded(
                   child: Center(
-                    child: Text(errorMessage!),
+                    child: Text(
+                      errorMessage!,
+                      style: const TextStyle(color: Colors.red),
+                    ),
                   ),
                 )
               else
@@ -1228,13 +1108,13 @@ List<dynamic> _extractSongsFromText(String text) {
                   child: _buildContent(),
                 ),
 
-              // Bottom Container
+              // Bottom Container with theme colors
               Container(
                 padding: const EdgeInsets.symmetric(vertical: 10),
-                decoration: const BoxDecoration(
-                  color: Color(0xFF2196F3),
+                decoration: BoxDecoration(
+                  color: _currentTheme.primary,
                   border: Border(
-                    top: BorderSide(color: Colors.blue, width: 2),
+                    top: BorderSide(color: _currentTheme.primary, width: 2),
                   ),
                 ),
                 child: Row(
@@ -1242,15 +1122,24 @@ List<dynamic> _extractSongsFromText(String text) {
                   children: [
                     IconButton(
                       icon: const Icon(Icons.home, size: 30, color: Colors.black),
-                      onPressed: () {Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (context) => HomeScreen(userData: userProfileData),
-                            ),
-                          );},
+                      onPressed: () {
+                        Navigator.pushReplacement(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => HomeScreen(userData: widget.p_userData),
+                          ),
+                        );
+                      },
                     ),
                     GestureDetector(
-                      onTap: () {Navigator.pushNamed(context, '/chat');},
+                      onTap: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => ChatScreen(userData: widget.p_userData),
+                          ),
+                        );
+                      },
                       child: Image.asset(
                         'assets/icons/4616759.png',
                         height: 30,
@@ -1260,11 +1149,15 @@ List<dynamic> _extractSongsFromText(String text) {
                     ),
                     IconButton(
                       icon: const Icon(Icons.account_circle_outlined, size: 30, color: Colors.black),
-                      onPressed: () {Navigator.pushNamed(context, '/profile');},
+                      onPressed: () {
+                        Navigator.pushNamed(context, '/profile');
+                      },
                     ),
                     IconButton(
                       icon: const Icon(Icons.people, size: 30, color: Colors.black),
-                      onPressed: () {Navigator.pushNamed(context, '/pro');},
+                      onPressed: () {
+                        Navigator.pushNamed(context, '/pro');
+                      },
                     ),
                   ],
                 ),

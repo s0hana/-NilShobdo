@@ -3,7 +3,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 class ThemeManager {
   static const String _themeKey = 'selected_theme';
-  
 
   static final List<ColorTheme> colorThemes = [
     ColorTheme(
@@ -41,6 +40,41 @@ class ThemeManager {
       gradientEnd: const Color(0xFFBBDEFB),
       containerColor: const Color(0xFF90CAF9),
     ),
+    ColorTheme(
+      name: "Pink Blossom",
+      primary: const Color(0xFFE91E63),
+      gradientStart: const Color(0xFFF8BBD0),
+      gradientEnd: const Color(0xFFFCE4EC),
+      containerColor: const Color(0xFFF48FB1),
+    ),
+    ColorTheme(
+      name: "Teal Breeze",
+      primary: const Color(0xFF009688),
+      gradientStart: const Color(0xFF80CBC4),
+      gradientEnd: const Color(0xFFE0F2F1),
+      containerColor: const Color(0xFFB2DFDB),
+    ),
+    ColorTheme(
+      name: "Golden Glow",
+      primary: const Color(0xFFFFC107),
+      gradientStart: const Color(0xFFFFE082),
+      gradientEnd: const Color(0xFFFFF8E1),
+      containerColor: const Color(0xFFFFF59D),
+    ),
+    ColorTheme(
+      name: "Red Passion",
+      primary: const Color(0xFFF44336),
+      gradientStart: const Color(0xFFEF9A9A),
+      gradientEnd: const Color(0xFFFFEBEE),
+      containerColor: const Color(0xFFE57373),
+    ),
+    ColorTheme(
+      name: "Sky Morning",
+      primary: const Color(0xFF64B5F6),
+      gradientStart: const Color(0xFFFFF176),
+      gradientEnd: const Color(0xFFFFFDE7),
+      containerColor: const Color(0xFFE3F2FD),
+    ),
   ];
 
   static Future<void> saveSelectedTheme(int themeIndex) async {
@@ -50,14 +84,14 @@ class ThemeManager {
 
   static Future<int> getSelectedThemeIndex() async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getInt(_themeKey) ?? 0; 
+    return prefs.getInt(_themeKey) ?? 0;
   }
 
   static ColorTheme getCurrentTheme(int index) {
     if (index >= 0 && index < colorThemes.length) {
       return colorThemes[index];
     }
-    return colorThemes[0]; 
+    return colorThemes[0];
   }
 }
 

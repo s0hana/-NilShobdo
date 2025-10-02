@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'theme_manager.dart'; // Theme manager import করুন
 
 class ResetPasswordScreen extends StatefulWidget {
   const ResetPasswordScreen({super.key});
@@ -18,6 +19,29 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
   bool _emailSent = false;
   bool _redirecting = false;
 
+  // Theme variables
+  int _currentThemeIndex = 0;
+  ColorTheme _currentTheme = ThemeManager.colorThemes[0];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadTheme();
+    // Pre-fill with current user's email if available
+    User? user = _auth.currentUser;
+    if (user != null && user.email != null) {
+      _emailController.text = user.email!;
+    }
+  }
+
+  Future<void> _loadTheme() async {
+    final themeIndex = await ThemeManager.getSelectedThemeIndex();
+    setState(() {
+      _currentThemeIndex = themeIndex;
+      _currentTheme = ThemeManager.getCurrentTheme(themeIndex);
+    });
+  }
+
   Future<void> _sendPasswordResetEmail() async {
     if (!_formKey.currentState!.validate()) return;
     
@@ -33,9 +57,10 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
       });
       
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Password reset email sent! Check your inbox.'),
-          duration: Duration(seconds: 5),
+        SnackBar(
+          content: const Text('Password reset email sent! Check your inbox.'),
+          backgroundColor: _currentTheme.primary,
+          duration: const Duration(seconds: 5),
         )
       );
       
@@ -58,11 +83,17 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
       }
       
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(errorMessage))
+        SnackBar(
+          content: Text(errorMessage),
+          backgroundColor: Colors.red,
+        )
       );
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('An error occurred: $e'))
+        SnackBar(
+          content: Text('An error occurred: $e'),
+          backgroundColor: Colors.red,
+        )
       );
     } finally {
       setState(() {
@@ -100,12 +131,14 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Reset Password'),
-        backgroundColor: const Color(0xFF2196F3),
+        backgroundColor: _currentTheme.primary,
+        foregroundColor: Colors.black,
+        elevation: 0,
       ),
       body: Container(
-        decoration: const BoxDecoration(
+        decoration: BoxDecoration(
           gradient: LinearGradient(
-            colors: [Color(0xFF90CAF9), Color(0xFFBAE0FF)],
+            colors: [_currentTheme.gradientStart, _currentTheme.gradientEnd],
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
           ),
@@ -118,15 +151,16 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
               child: ListView(
                 children: [
                   // Header Icon
-                  const Icon(
-                    Icons.lock_reset,
+                  Icon(
+                    _emailSent ? Icons.mark_email_read : Icons.lock_reset,
                     size: 80,
-                    color: Colors.blue,
+                    color: _emailSent ? Colors.green : _currentTheme.primary,
                   ),
                   const SizedBox(height: 16),
                   
                   // Title
                   Text(
+                    _redirecting ? 'Redirecting...' :
                     _emailSent ? 'Check Your Email' : 'Reset Password',
                     textAlign: TextAlign.center,
                     style: const TextStyle(
@@ -138,24 +172,60 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
                   
                   if (_redirecting) ...[
                     // Redirecting message
-                    const Column(
+                    Column(
                       children: [
-                        CircularProgressIndicator(),
-                        SizedBox(height: 20),
+                        CircularProgressIndicator(
+                          color: _currentTheme.primary,
+                        ),
+                        const SizedBox(height: 20),
                         Text(
                           'Redirecting to login...',
                           textAlign: TextAlign.center,
-                          style: TextStyle(fontSize: 18),
+                          style: TextStyle(
+                            fontSize: 18,
+                            color: _currentTheme.primary,
+                            fontWeight: FontWeight.w500,
+                          ),
                         ),
                       ],
                     ),
                   ] else if (_emailSent) ...[
-                    // Success Message
-                    const Text(
-                      'We\'ve sent a password reset link to your email address. '
-                      'Please check your inbox and follow the instructions to reset your password.',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(fontSize: 16),
+                    // Success Message Container
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: _currentTheme.containerColor,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: Colors.green,
+                          width: 2,
+                        ),
+                      ),
+                      child: Column(
+                        children: [
+                          Text(
+                            'We\'ve sent a password reset link to:',
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(fontSize: 16),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            _emailController.text,
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                              color: _currentTheme.primary,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          const Text(
+                            'Please check your inbox and follow the instructions to reset your password.',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(fontSize: 14),
+                          ),
+                        ],
+                      ),
                     ),
                     const SizedBox(height: 24),
                     
@@ -163,15 +233,20 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
                     ElevatedButton(
                       onPressed: _redirectNow,
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.blueAccent,
-                        minimumSize: const Size(double.infinity, 50),
+                        backgroundColor: _currentTheme.primary,
+                        foregroundColor: Colors.black,
+                        minimumSize: const Size(double.infinity, 55),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(12),
                         ),
+                        elevation: 4,
                       ),
                       child: const Text(
                         'Go to Login Now',
-                        style: TextStyle(fontSize: 18),
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
                     ),
                     const SizedBox(height: 16),
@@ -180,24 +255,46 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
                     OutlinedButton(
                       onPressed: _isLoading ? null : _sendPasswordResetEmail,
                       style: OutlinedButton.styleFrom(
-                        minimumSize: const Size(double.infinity, 50),
+                        foregroundColor: _currentTheme.primary,
+                        side: BorderSide(
+                          color: _currentTheme.primary,
+                          width: 2,
+                        ),
+                        minimumSize: const Size(double.infinity, 55),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(12),
                         ),
                       ),
                       child: _isLoading
-                          ? const CircularProgressIndicator(color: Colors.blue)
+                          ? SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(
+                                color: _currentTheme.primary,
+                                strokeWidth: 2,
+                              ),
+                            )
                           : const Text(
                               'Resend Email',
-                              style: TextStyle(fontSize: 16),
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                              ),
                             ),
                     ),
                   ] else ...[
-                    // Instructions
-                    const Text(
-                      'Enter your email address and we\'ll send you a link to reset your password.',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(fontSize: 16),
+                    // Instructions Container
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: _currentTheme.containerColor,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: const Text(
+                        'Enter your email address and we\'ll send you a link to reset your password.',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(fontSize: 16),
+                      ),
                     ),
                     const SizedBox(height: 24),
                     
@@ -206,13 +303,22 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
                       controller: _emailController,
                       decoration: InputDecoration(
                         labelText: 'Email',
-                        prefixIcon: const Icon(Icons.email),
+                        labelStyle: TextStyle(color: _currentTheme.primary),
+                        prefixIcon: Icon(Icons.email, color: _currentTheme.primary),
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(color: _currentTheme.primary),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(color: _currentTheme.primary, width: 2),
                         ),
                         filled: true,
-                        fillColor: Colors.white70,
+                        fillColor: _currentTheme.containerColor,
+                        hintText: 'Enter your email address',
+                        hintStyle: TextStyle(color: Colors.black54),
                       ),
+                      style: const TextStyle(color: Colors.black87),
                       keyboardType: TextInputType.emailAddress,
                       validator: (value) {
                         if (value == null || value.isEmpty) {
@@ -224,24 +330,91 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
                         return null;
                       },
                     ),
-                    const SizedBox(height: 24),
+                    const SizedBox(height: 32),
                     
                     // Send Button
                     ElevatedButton(
                       onPressed: _isLoading ? null : _sendPasswordResetEmail,
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.blueAccent,
-                        minimumSize: const Size(double.infinity, 50),
+                        backgroundColor: _currentTheme.primary,
+                        foregroundColor: Colors.black,
+                        minimumSize: const Size(double.infinity, 55),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        elevation: 4,
+                        shadowColor: _currentTheme.primary.withOpacity(0.3),
+                      ),
+                      child: _isLoading
+                          ? SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(
+                                color: Colors.black,
+                                strokeWidth: 2,
+                              ),
+                            )
+                          : const Text(
+                              'Send Reset Link',
+                              style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                    ),
+
+                    const SizedBox(height: 16),
+
+                    // Cancel Button
+                    OutlinedButton(
+                      onPressed: _isLoading ? null : () => Navigator.pop(context),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: _currentTheme.primary,
+                        side: BorderSide(
+                          color: _currentTheme.primary,
+                          width: 2,
+                        ),
+                        minimumSize: const Size(double.infinity, 55),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(12),
                         ),
                       ),
-                      child: _isLoading
-                          ? const CircularProgressIndicator(color: Colors.white)
-                          : const Text(
-                              'Send Reset Link',
-                              style: TextStyle(fontSize: 18),
+                      child: const Text(
+                        'Cancel',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+
+                    // Additional Help Text
+                    const SizedBox(height: 24),
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: _currentTheme.containerColor.withOpacity(0.7),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(
+                            Icons.info_outline,
+                            color: _currentTheme.primary,
+                            size: 20,
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'Check your spam folder if you don\'t see the email within a few minutes.',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.black54,
+                              ),
                             ),
+                          ),
+                        ],
+                      ),
                     ),
                   ],
                 ],
@@ -251,16 +424,6 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
         ),
       ),
     );
-  }
-  
-  @override
-  void initState() {
-    super.initState();
-    // Pre-fill with current user's email if available
-    User? user = _auth.currentUser;
-    if (user != null && user.email != null) {
-      _emailController.text = user.email!;
-    }
   }
   
   @override

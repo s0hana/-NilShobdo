@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'dart:convert';
 import 'home_screen.dart';
 import 'chat_sceen.dart';
+import 'exercise_screen.dart';
+import 'theme_manager.dart'; 
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -18,10 +21,23 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Map<String, dynamic> _userData = {};
   bool _isLoading = true;
 
+  // Theme variables
+  int _currentThemeIndex = 0;
+  ColorTheme _currentTheme = ThemeManager.colorThemes[0];
+
   @override
   void initState() {
     super.initState();
+    _loadTheme();
     _getUserData();
+  }
+
+  Future<void> _loadTheme() async {
+    final themeIndex = await ThemeManager.getSelectedThemeIndex();
+    setState(() {
+      _currentThemeIndex = themeIndex;
+      _currentTheme = ThemeManager.getCurrentTheme(themeIndex);
+    });
   }
 
   Future<void> _getUserData() async {
@@ -67,6 +83,28 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
+  ImageProvider _getProfileImage() {
+    // First check if base64 image exists
+    if (_userData['profilePictureBase64'] != null) {
+      try {
+        final base64String = _userData['profilePictureBase64'];
+        final bytes = base64Decode(base64String);
+        return MemoryImage(bytes);
+      } catch (e) {
+        print('Error decoding base64 image: $e');
+        // If base64 decoding fails, fall back to other options
+      }
+    }
+    
+    // Then check if network URL exists
+    if (_userData['photoURL'] != null) {
+      return NetworkImage(_userData['photoURL']);
+    }
+    
+    // Finally use default asset image
+    return const AssetImage('assets/images/user_photo.png');
+  }
+
   Future<void> _signOut() async {
     try {
       await _auth.signOut();
@@ -76,13 +114,63 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
+  void _showSignOutDialog() {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          backgroundColor: _currentTheme.containerColor,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+          title: const Text(
+            'Sign Out',
+            style: TextStyle(
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          content: const Text(
+            'Are you sure you want to sign out?',
+            style: TextStyle(
+              fontSize: 16,
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.of(context).pop();
+              },
+              child: Text(
+                'Cancel',
+                style: TextStyle(
+                  color: _currentTheme.primary,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+            TextButton(
+              onPressed: _signOut,
+              child: const Text(
+                'Sign Out',
+                style: TextStyle(
+                  color: Colors.red,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       body: Container(
-        decoration: const BoxDecoration(
+        decoration: BoxDecoration(
           gradient: LinearGradient(
-            colors: [Color(0xFF90CAF9), Color(0xFFBAE0FF)],
+            colors: [_currentTheme.gradientStart, _currentTheme.gradientEnd],
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
           ),
@@ -90,14 +178,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
         child: SafeArea(
           child: Column(
             children: [
-              // 🔹 Top Container
+              // 🔹 Top Container with theme colors
               Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                decoration: const BoxDecoration(
-                  color: Color(0xFF2196F3),
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                decoration: BoxDecoration(
+                  color: _currentTheme.primary,
                   border: Border(
-                    bottom: BorderSide(color: Colors.blue, width: 2),
+                    bottom: BorderSide(color: _currentTheme.primary, width: 2),
                   ),
                 ),
                 child: Row(
@@ -137,20 +224,63 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       child: Row(
                         children: [
                           // Profile Photo
-                          CircleAvatar(
-                            radius: 30,
-                            backgroundImage: _userData['photoURL'] != null
-                                ? NetworkImage(_userData['photoURL'])
-                                : const AssetImage('assets/images/user_photo.png') as ImageProvider,
+                          Container(
+                            width: 70,
+                            height: 70,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              border: Border.all(
+                                color: _currentTheme.primary,
+                                width: 3,
+                              ),
+                            ),
+                            child: CircleAvatar(
+                              radius: 32,
+                              backgroundColor: _currentTheme.containerColor,
+                              backgroundImage: _getProfileImage(),
+                              child: _userData['profilePictureBase64'] == null && 
+                                     _userData['photoURL'] == null
+                                  ? Icon(
+                                      Icons.person,
+                                      size: 35,
+                                      color: _currentTheme.primary.withOpacity(0.5),
+                                    )
+                                  : null,
+                            ),
                           ),
                           const SizedBox(width: 16),
                           // Greeting Text
-                          Text(
-                            "Hi, ${_userData['fullName'] ?? 'User'}!",
-                            style: const TextStyle(
-                              fontSize: 24,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.black87,
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  "Hi, ${_userData['fullName'] ?? 'User'}!",
+                                  style: const TextStyle(
+                                    fontSize: 24,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.black87,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  _userData['email'] ?? '',
+                                  style: TextStyle(
+                                    fontSize: 14,
+                                    color: Colors.black54,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                if (_userData['profilePictureBase64'] != null)
+                                  Text(
+                                    '✓ Profile Picture Saved',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: _currentTheme.primary,
+                                      fontStyle: FontStyle.italic,
+                                    ),
+                                  ),
+                              ],
                             ),
                           ),
                         ],
@@ -171,6 +301,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             label: "Full Name",
                             value: _userData['fullName'] ?? 'Not set',
                             icon: Icons.person,
+                            theme: _currentTheme,
                           ),
                           const SizedBox(height: 12),
                           // Email
@@ -178,6 +309,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             label: "Email",
                             value: _userData['email'] ?? 'Not set',
                             icon: Icons.email,
+                            theme: _currentTheme,
                           ),
                           const SizedBox(height: 12),
                           // Birthday
@@ -185,6 +317,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             label: "Birthday",
                             value: _userData['birthday'] ?? 'Not set',
                             icon: Icons.cake,
+                            theme: _currentTheme,
                           ),
                           const SizedBox(height: 12),
                           // Gender
@@ -194,13 +327,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             icon: _userData['gender']?.toString().toLowerCase() == 'female'
                                 ? Icons.female
                                 : Icons.male,
+                            theme: _currentTheme,
                           ),
                           const SizedBox(height: 20),
 
                           // Update Profile Button
                           ElevatedButton(
                             style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.blueAccent,
+                              backgroundColor: _currentTheme.primary,
+                              foregroundColor: Colors.white,
                               minimumSize: const Size(double.infinity, 50),
                               shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(12),
@@ -219,7 +354,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           // Change Password Button
                           ElevatedButton(
                             style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.blueAccent,
+                              backgroundColor: _currentTheme.primary,
+                              foregroundColor: Colors.white,
                               minimumSize: const Size(double.infinity, 50),
                               shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(12),
@@ -235,9 +371,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           ),
                           const SizedBox(height: 12),
 
+                          // Change Email Button
                           ElevatedButton(
                             style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.blueAccent,
+                              backgroundColor: _currentTheme.primary,
+                              foregroundColor: Colors.white,
                               minimumSize: const Size(double.infinity, 50),
                               shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(12),
@@ -257,15 +395,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           ElevatedButton(
                             style: ElevatedButton.styleFrom(
                               backgroundColor: Colors.redAccent,
+                              foregroundColor: Colors.white,
                               minimumSize: const Size(double.infinity, 50),
                               shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(12),
                               ),
                             ),
-                            onPressed: _signOut,
+                            onPressed: _showSignOutDialog,
                             child: const Text(
                               "Logout",
-                              style: TextStyle(fontSize: 18, color: Colors.white),
+                              style: TextStyle(fontSize: 18),
                             ),
                           ),
                           const SizedBox(height: 20),
@@ -273,13 +412,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       ),
               ),
 
-              // 🔹 Bottom Navigation Bar
+              // 🔹 Bottom Navigation Bar with theme colors
               Container(
                 padding: const EdgeInsets.symmetric(vertical: 10),
-                decoration: const BoxDecoration(
-                  color: Color(0xFF2196F3),
+                decoration: BoxDecoration(
+                  color: _currentTheme.primary,
                   border: Border(
-                    top: BorderSide(color: Colors.blue, width: 2),
+                    top: BorderSide(color: _currentTheme.primary, width: 2),
                   ),
                 ),
                 child: Row(
@@ -289,20 +428,20 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       icon: const Icon(Icons.home, size: 30, color: Colors.black),
                       onPressed: () {
                         Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                        builder: (context) => HomeScreen(userData: _userData),
-                        ),
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => HomeScreen(userData: _userData),
+                          ),
                         );
                       },
                     ),
                     GestureDetector(
                       onTap: () {
                         Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                        builder: (context) => ChatScreen(userData: _userData),
-                        ),
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => ChatScreen(userData: _userData),
+                          ),
                         );
                       },
                       child: Image.asset(
@@ -315,7 +454,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     IconButton(
                       icon: const Icon(Icons.fitness_center, size: 30, color: Colors.black),
                       onPressed: () {
-                        Navigator.pushNamed(context, '/exercise');
+                        Navigator.pushReplacement(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => RecommendationsScreen(
+                              p_userData: _userData, 
+                              userId: _currentUser?.uid ?? 'AYPqR0TqB4cjbZeofNIPYAOTtWO2'
+                            ),
+                          ),
+                        );
                       },
                     ),
                     IconButton(
@@ -335,21 +482,27 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 }
 
-// 🔹 Custom Widget for Profile Info
+// 🔹 Custom Widget for Profile Info with theme support
 class ProfileInfoTile extends StatelessWidget {
   final String label;
   final String value;
   final IconData icon;
+  final ColorTheme theme;
 
-  const ProfileInfoTile(
-      {super.key, required this.label, required this.value, required this.icon});
+  const ProfileInfoTile({
+    super.key, 
+    required this.label, 
+    required this.value, 
+    required this.icon,
+    required this.theme,
+  });
 
   @override
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
-        color: Colors.white70,
+        color: theme.containerColor,
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
@@ -361,7 +514,7 @@ class ProfileInfoTile extends StatelessWidget {
       ),
       child: Row(
         children: [
-          Icon(icon, color: Colors.black87),
+          Icon(icon, color: theme.primary),
           const SizedBox(width: 12),
           Expanded(
             child: Column(

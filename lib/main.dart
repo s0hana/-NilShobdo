@@ -20,6 +20,7 @@ import 'reset_password_screen.dart';
 import 'reset_email.dart';
 import 'profile_update_screen.dart';
 import 'book_preview.dart';
+import 'appearance_settings.dart' as app;
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   
@@ -50,7 +51,7 @@ class NilShobdoApp extends StatelessWidget {
         '/signup': (context) => const SignUpScreen(),
         '/home': (context) => HomeScreen(userData: {}),
         '/chat': (context) => const ChatScreen(userData: {},),  
-        '/exercise': (context) => const RecommendationsScreen(userId: 'AYPqR0TqB4cjbZeofNIPYAOTtWO2'),
+        '/exercise': (context) => const RecommendationsScreen(p_userData: {}, userId: 'AYPqR0TqB4cjbZeofNIPYAOTtWO2'),
         '/profile': (context) => const ProfileScreen(),
         '/note': (context) => const MotivationScreen(),
         '/set' : (context) => const SettingsScreen(),
@@ -60,6 +61,7 @@ class NilShobdoApp extends StatelessWidget {
         '/resetpass': (context) => ResetPasswordScreen(),
         '/resetemail': (context) => UpdateEmailScreen(),
         '/updateinfo': (context) => UpdateProfileScreen(),
+        '/appearance': (context) => const app.AppearanceSettingsScreen(),
         '/book_preview': (context) {
       final args = ModalRoute.of(context)!.settings.arguments as Map<String, dynamic>;
       return BookPreviewScreen(

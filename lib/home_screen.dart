@@ -1,40 +1,78 @@
+import 'dart:convert';
 import 'dart:math';
 import 'package:flutter/material.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'chat_sceen.dart';
+import 'theme_manager.dart';
 import 'exercise_screen.dart';
-import 'profile_screen.dart';
-import 'professionals_screen.dart';
-import 'settings.dart';
 
-class HomeScreen extends StatelessWidget {
+class HomeScreen extends StatefulWidget {
   final Map<String, dynamic> userData;
 
-  HomeScreen({super.key, required this.userData}); 
+  const HomeScreen({super.key, required this.userData});
 
+  @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
   final List<String> motivationalMessages = [
     "Believe in yourself! 💪",
     "Every day is a fresh start 🌅",
     "Stay positive, work hard, make it happen ✨",
-    "Your only limit is your mind 🧠",
-    "Push yourself, because no one else will do it for you 🚀",
-    "Dream it. Wish it. Do it. 🌟",
     "Little progress each day adds up to big results 📈",
   ];
+
+  int _currentThemeIndex = 0;
+  ColorTheme _currentTheme = ThemeManager.colorThemes[0];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadTheme();
+  }
+
+  Future<void> _loadTheme() async {
+    final themeIndex = await ThemeManager.getSelectedThemeIndex();
+    setState(() {
+      _currentThemeIndex = themeIndex;
+      _currentTheme = ThemeManager.getCurrentTheme(themeIndex);
+    });
+  }
+
+  ImageProvider _getProfileImage() {
+    // First check if base64 image exists
+    if (widget.userData['profilePictureBase64'] != null) {
+      try {
+        final base64String = widget.userData['profilePictureBase64'];
+        final bytes = base64Decode(base64String);
+        return MemoryImage(bytes);
+      } catch (e) {
+        print('Error decoding base64 image: $e');
+        // If base64 decoding fails, fall back to other options
+      }
+    }
+    
+    // Then check if network URL exists
+    if (widget.userData['photoURL'] != null) {
+      return NetworkImage(widget.userData['photoURL']);
+    }
+    
+    // Finally use default asset image
+    return const AssetImage('assets/images/user_photo.png');
+  }
 
   @override
   Widget build(BuildContext context) {
     final randomMessage = motivationalMessages[Random().nextInt(motivationalMessages.length)];
 
-    final userName = userData['fullName'] ?? 'User'; 
-    final email = userData['email'] ?? ' ';   
-    final photoUrl = userData['photoURL'];             
+    final userName = widget.userData['fullName'] ?? 'User'; 
+    final email = widget.userData['email'] ?? ' ';   
 
     return Scaffold(
       body: Container(
-        decoration: const BoxDecoration(
+        decoration: BoxDecoration(
           gradient: LinearGradient(
-            colors: [Color(0xFF90CAF9), Color(0xFFBAE0FF)],
+            colors: [_currentTheme.gradientStart, _currentTheme.gradientEnd],
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
           ),
@@ -42,13 +80,14 @@ class HomeScreen extends StatelessWidget {
         child: SafeArea(
           child: Column(
             children: [
+              // Top Bar with theme colors
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                decoration: const BoxDecoration(
+                decoration: BoxDecoration(
                   border: Border(
-                    bottom: BorderSide(color: Colors.blue, width: 2),
+                    bottom: BorderSide(color: _currentTheme.primary, width: 2),
                   ),
-                  color: Color(0xFF2196F3),
+                  color: _currentTheme.primary,
                 ),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -75,12 +114,32 @@ class HomeScreen extends StatelessWidget {
               Center(
                 child: Column(
                   children: [
-                    if (photoUrl != null)
-                      CircleAvatar(
-                        radius: 40,
-                        backgroundImage: NetworkImage(photoUrl),
+                    // Profile Photo with proper base64 handling
+                    Container(
+                      width: 80,
+                      height: 80,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: _currentTheme.primary,
+                          width: 3,
+                        ),
                       ),
-                    const SizedBox(height: 12),
+                      child: CircleAvatar(
+                        radius: 38,
+                        backgroundColor: _currentTheme.containerColor,
+                        backgroundImage: _getProfileImage(),
+                        child: widget.userData['profilePictureBase64'] == null && 
+                               widget.userData['photoURL'] == null
+                            ? Icon(
+                                Icons.person,
+                                size: 40,
+                                color: _currentTheme.primary.withOpacity(0.5),
+                              )
+                            : null,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
                     Text(
                       "Hi, $userName!\nWelcome Back!",
                       textAlign: TextAlign.center,
@@ -96,22 +155,30 @@ class HomeScreen extends StatelessWidget {
                     ),
                     const SizedBox(height: 200),
 
-                    // Motivational Message Box
+                    // Motivational Message Box with theme container color
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 30),
                       child: DecoratedBox(
-                        decoration: const BoxDecoration(
-                          borderRadius: BorderRadius.all(Radius.circular(12)),
-                          color: Colors.white70,
+                        decoration: BoxDecoration(
+                          borderRadius: const BorderRadius.all(Radius.circular(12)),
+                          color: _currentTheme.containerColor,
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withOpacity(0.1),
+                              blurRadius: 8,
+                              offset: const Offset(0, 4),
+                            ),
+                          ],
                         ),
                         child: Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 16.0, horizontal: 12.0),
+                          padding: const EdgeInsets.symmetric(vertical: 20.0, horizontal: 16.0),
                           child: Text(
                             randomMessage,
                             textAlign: TextAlign.center,
                             style: const TextStyle(
                               fontSize: 20,
                               color: Colors.black87,
+                              fontWeight: FontWeight.w500,
                             ),
                           ),
                         ),
@@ -123,14 +190,14 @@ class HomeScreen extends StatelessWidget {
 
               const Spacer(),
 
-              // 🔹 Bottom Navigation Bar
+              // Bottom Navigation Bar with theme colors
               Container(
                 padding: const EdgeInsets.symmetric(vertical: 10),
-                decoration: const BoxDecoration(
+                decoration: BoxDecoration(
                   border: Border(
-                    top: BorderSide(color: Colors.blue, width: 2),
+                    top: BorderSide(color: _currentTheme.primary, width: 2),
                   ),
-                  color: Color(0xFF2196F3),
+                  color: _currentTheme.primary,
                 ),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceAround,
@@ -140,7 +207,7 @@ class HomeScreen extends StatelessWidget {
                         Navigator.push(
                           context,
                           MaterialPageRoute(
-                            builder: (context) => ChatScreen(userData: userData),
+                            builder: (context) => ChatScreen(userData: widget.userData),
                           ),
                         );
                       },
@@ -152,10 +219,19 @@ class HomeScreen extends StatelessWidget {
                       ),
                     ),
                     IconButton(
-                        icon: const Icon(Icons.fitness_center, size: 30, color: Colors.black),
-                        onPressed: () {
-                          Navigator.pushNamed(context, '/exercise');
-                        }),
+                      icon: const Icon(Icons.fitness_center, size: 30, color: Colors.black),
+                      onPressed: () {
+                        Navigator.pushReplacement(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => RecommendationsScreen(
+                              p_userData: widget.userData, 
+                              userId: 'AYPqR0TqB4cjbZeofNIPYAOTtWO2'
+                            ),
+                          ),
+                        );
+                      },
+                    ),
                     IconButton(
                       icon: const Icon(Icons.account_circle_outlined, size: 30, color: Colors.black),
                       onPressed: () {
@@ -163,11 +239,11 @@ class HomeScreen extends StatelessWidget {
                       },
                     ),
                     IconButton(
-                    icon: const Icon(Icons.people, size: 30, color: Colors.black),
-                    onPressed: () {
-                      Navigator.pushNamed(context, '/pro');
-                    },
-                  ),
+                      icon: const Icon(Icons.people, size: 30, color: Colors.black),
+                      onPressed: () {
+                        Navigator.pushNamed(context, '/pro');
+                      },
+                    ),
                   ],
                 ),
               ),

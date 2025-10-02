@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'theme_manager.dart'; // Theme manager import করুন
 
 class UpdateEmailScreen extends StatefulWidget {
   const UpdateEmailScreen({super.key});
@@ -27,10 +28,23 @@ class _UpdateEmailScreenState extends State<UpdateEmailScreen> {
   bool _emailUpdated = false;
   bool _redirecting = false;
 
+  // Theme variables
+  int _currentThemeIndex = 0;
+  ColorTheme _currentTheme = ThemeManager.colorThemes[0];
+
   @override
   void initState() {
     super.initState();
+    _loadTheme();
     _loadCurrentEmail();
+  }
+
+  Future<void> _loadTheme() async {
+    final themeIndex = await ThemeManager.getSelectedThemeIndex();
+    setState(() {
+      _currentThemeIndex = themeIndex;
+      _currentTheme = ThemeManager.getCurrentTheme(themeIndex);
+    });
   }
 
   void _loadCurrentEmail() {
@@ -104,9 +118,10 @@ class _UpdateEmailScreenState extends State<UpdateEmailScreen> {
         });
         
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Verification email sent to your new email address.'),
-            duration: Duration(seconds: 5),
+          SnackBar(
+            content: const Text('Verification email sent to your new email address.'),
+            backgroundColor: _currentTheme.primary,
+            duration: const Duration(seconds: 5),
           )
         );
       }
@@ -130,11 +145,17 @@ class _UpdateEmailScreenState extends State<UpdateEmailScreen> {
       }
       
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(errorMessage))
+        SnackBar(
+          content: Text(errorMessage),
+          backgroundColor: Colors.red,
+        )
       );
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('An error occurred: $e'))
+        SnackBar(
+          content: Text('An error occurred: $e'),
+          backgroundColor: Colors.red,
+        )
       );
     } finally {
       setState(() {
@@ -162,19 +183,28 @@ class _UpdateEmailScreenState extends State<UpdateEmailScreen> {
         });
         
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Email successfully verified and updated in all systems!'))
+          SnackBar(
+            content: const Text('Email successfully verified and updated in all systems!'),
+            backgroundColor: Colors.green,
+          )
         );
         
         // Start countdown to redirect
         _startRedirectCountdown();
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Email not yet verified. Please check your inbox.'))
+          const SnackBar(
+            content: Text('Email not yet verified. Please check your inbox.'),
+            backgroundColor: Colors.orange,
+          )
         );
       }
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error updating email: $e'))
+        SnackBar(
+          content: Text('Error updating email: $e'),
+          backgroundColor: Colors.red,
+        )
       );
     } finally {
       setState(() {
@@ -213,12 +243,14 @@ class _UpdateEmailScreenState extends State<UpdateEmailScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Update Email'),
-        backgroundColor: const Color(0xFF2196F3),
+        backgroundColor: _currentTheme.primary,
+        foregroundColor: Colors.black,
+        elevation: 0,
       ),
       body: Container(
-        decoration: const BoxDecoration(
+        decoration: BoxDecoration(
           gradient: LinearGradient(
-            colors: [Color(0xFF90CAF9), Color(0xFFBAE0FF)],
+            colors: [_currentTheme.gradientStart, _currentTheme.gradientEnd],
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
           ),
@@ -235,7 +267,7 @@ class _UpdateEmailScreenState extends State<UpdateEmailScreen> {
                     _emailUpdated ? Icons.check_circle : 
                     _verificationSent ? Icons.mark_email_read : Icons.email,
                     size: 80,
-                    color: _emailUpdated ? Colors.green : Colors.blue,
+                    color: _emailUpdated ? Colors.green : _currentTheme.primary,
                   ),
                   const SizedBox(height: 16),
                   
@@ -254,24 +286,60 @@ class _UpdateEmailScreenState extends State<UpdateEmailScreen> {
                   
                   if (_redirecting) ...[
                     // Redirecting message
-                    const Column(
+                    Column(
                       children: [
-                        CircularProgressIndicator(),
-                        SizedBox(height: 20),
+                        CircularProgressIndicator(
+                          color: _currentTheme.primary,
+                        ),
+                        const SizedBox(height: 20),
                         Text(
                           'Email updated successfully. Redirecting to login...',
                           textAlign: TextAlign.center,
-                          style: TextStyle(fontSize: 18),
+                          style: TextStyle(
+                            fontSize: 18,
+                            color: _currentTheme.primary,
+                            fontWeight: FontWeight.w500,
+                          ),
                         ),
                       ],
                     ),
                   ] else if (_emailUpdated) ...[
                     // Success Message
-                    Text(
-                      'Your email has been successfully updated to ${_newEmailController.text}. '
-                      'You need to login again with your new email address.',
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(fontSize: 16),
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: _currentTheme.containerColor,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: Colors.green,
+                          width: 2,
+                        ),
+                      ),
+                      child: Column(
+                        children: [
+                          Text(
+                            'Your email has been successfully updated to:',
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(fontSize: 16),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            _newEmailController.text,
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                              color: _currentTheme.primary,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          const Text(
+                            'You need to login again with your new email address.',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(fontSize: 14),
+                          ),
+                        ],
+                      ),
                     ),
                     const SizedBox(height: 24),
                     
@@ -280,23 +348,58 @@ class _UpdateEmailScreenState extends State<UpdateEmailScreen> {
                       onPressed: _redirectNow,
                       style: ElevatedButton.styleFrom(
                         backgroundColor: Colors.green,
-                        minimumSize: const Size(double.infinity, 50),
+                        foregroundColor: Colors.white,
+                        minimumSize: const Size(double.infinity, 55),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(12),
                         ),
+                        elevation: 4,
                       ),
                       child: const Text(
                         'Login Now',
-                        style: TextStyle(fontSize: 18),
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
                     ),
                   ] else if (_verificationSent) ...[
                     // Verification Sent Message
-                    Text(
-                      'We\'ve sent a verification email to ${_newEmailController.text}. '
-                      'Please check your inbox and click the verification link to confirm your new email address.',
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(fontSize: 16),
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: _currentTheme.containerColor,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: _currentTheme.primary,
+                          width: 2,
+                        ),
+                      ),
+                      child: Column(
+                        children: [
+                          Text(
+                            'We\'ve sent a verification email to:',
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(fontSize: 16),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            _newEmailController.text,
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                              color: _currentTheme.primary,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          const Text(
+                            'Please check your inbox and click the verification link to confirm your new email address.',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(fontSize: 14),
+                          ),
+                        ],
+                      ),
                     ),
                     const SizedBox(height: 24),
                     
@@ -304,17 +407,29 @@ class _UpdateEmailScreenState extends State<UpdateEmailScreen> {
                     ElevatedButton(
                       onPressed: _isLoading ? null : _checkEmailVerified,
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.blueAccent,
-                        minimumSize: const Size(double.infinity, 50),
+                        backgroundColor: _currentTheme.primary,
+                        foregroundColor: Colors.black,
+                        minimumSize: const Size(double.infinity, 55),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(12),
                         ),
+                        elevation: 4,
                       ),
                       child: _isLoading
-                          ? const CircularProgressIndicator(color: Colors.white)
+                          ? SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(
+                                color: Colors.black,
+                                strokeWidth: 2,
+                              ),
+                            )
                           : const Text(
                               'I\'ve Verified My Email',
-                              style: TextStyle(fontSize: 18),
+                              style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                              ),
                             ),
                     ),
                     const SizedBox(height: 16),
@@ -323,22 +438,37 @@ class _UpdateEmailScreenState extends State<UpdateEmailScreen> {
                     OutlinedButton(
                       onPressed: _isLoading ? null : _sendEmailVerification,
                       style: OutlinedButton.styleFrom(
-                        minimumSize: const Size(double.infinity, 50),
+                        foregroundColor: _currentTheme.primary,
+                        side: BorderSide(
+                          color: _currentTheme.primary,
+                          width: 2,
+                        ),
+                        minimumSize: const Size(double.infinity, 55),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(12),
                         ),
                       ),
                       child: const Text(
                         'Resend Verification',
-                        style: TextStyle(fontSize: 16),
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
                     ),
                   ] else ...[
                     // Instructions
-                    const Text(
-                      'To update your email address, we need to verify your identity and send a confirmation to your new email.',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(fontSize: 16),
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: _currentTheme.containerColor,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: const Text(
+                        'To update your email address, we need to verify your identity and send a confirmation to your new email.',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(fontSize: 16),
+                      ),
                     ),
                     const SizedBox(height: 24),
                     
@@ -347,13 +477,20 @@ class _UpdateEmailScreenState extends State<UpdateEmailScreen> {
                       controller: _currentEmailController,
                       decoration: InputDecoration(
                         labelText: 'Current Email',
-                        prefixIcon: const Icon(Icons.email),
+                        labelStyle: TextStyle(color: _currentTheme.primary),
+                        prefixIcon: Icon(Icons.email, color: _currentTheme.primary),
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(color: _currentTheme.primary),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(color: _currentTheme.primary, width: 2),
                         ),
                         filled: true,
-                        fillColor: Colors.white70,
+                        fillColor: _currentTheme.containerColor,
                       ),
+                      style: const TextStyle(color: Colors.black87),
                       enabled: false,
                     ),
                     const SizedBox(height: 16),
@@ -363,13 +500,20 @@ class _UpdateEmailScreenState extends State<UpdateEmailScreen> {
                       controller: _newEmailController,
                       decoration: InputDecoration(
                         labelText: 'New Email',
-                        prefixIcon: const Icon(Icons.email_outlined),
+                        labelStyle: TextStyle(color: _currentTheme.primary),
+                        prefixIcon: Icon(Icons.email_outlined, color: _currentTheme.primary),
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(color: _currentTheme.primary),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(color: _currentTheme.primary, width: 2),
                         ),
                         filled: true,
-                        fillColor: Colors.white70,
+                        fillColor: _currentTheme.containerColor,
                       ),
+                      style: const TextStyle(color: Colors.black87),
                       keyboardType: TextInputType.emailAddress,
                       validator: (value) {
                         if (value == null || value.isEmpty) {
@@ -391,15 +535,22 @@ class _UpdateEmailScreenState extends State<UpdateEmailScreen> {
                       controller: _passwordController,
                       decoration: InputDecoration(
                         labelText: 'Password',
-                        prefixIcon: const Icon(Icons.lock),
+                        labelStyle: TextStyle(color: _currentTheme.primary),
+                        prefixIcon: Icon(Icons.lock, color: _currentTheme.primary),
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(color: _currentTheme.primary),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(color: _currentTheme.primary, width: 2),
                         ),
                         filled: true,
-                        fillColor: Colors.white70,
+                        fillColor: _currentTheme.containerColor,
                         suffixIcon: IconButton(
                           icon: Icon(
                             _obscurePassword ? Icons.visibility : Icons.visibility_off,
+                            color: _currentTheme.primary,
                           ),
                           onPressed: () {
                             setState(() {
@@ -408,6 +559,7 @@ class _UpdateEmailScreenState extends State<UpdateEmailScreen> {
                           },
                         ),
                       ),
+                      style: const TextStyle(color: Colors.black87),
                       obscureText: _obscurePassword,
                       validator: (value) {
                         if (value == null || value.isEmpty) {
@@ -419,24 +571,62 @@ class _UpdateEmailScreenState extends State<UpdateEmailScreen> {
                         return null;
                       },
                     ),
-                    const SizedBox(height: 24),
+                    const SizedBox(height: 32),
                     
                     // Send Verification Button
                     ElevatedButton(
                       onPressed: _isLoading ? null : _sendEmailVerification,
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.blueAccent,
-                        minimumSize: const Size(double.infinity, 50),
+                        backgroundColor: _currentTheme.primary,
+                        foregroundColor: Colors.black,
+                        minimumSize: const Size(double.infinity, 55),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        elevation: 4,
+                        shadowColor: _currentTheme.primary.withOpacity(0.3),
+                      ),
+                      child: _isLoading
+                          ? SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(
+                                color: Colors.black,
+                                strokeWidth: 2,
+                              ),
+                            )
+                          : const Text(
+                              'Send Verification Email',
+                              style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                    ),
+
+                    const SizedBox(height: 16),
+
+                    // Cancel Button
+                    OutlinedButton(
+                      onPressed: _isLoading ? null : () => Navigator.pop(context),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: _currentTheme.primary,
+                        side: BorderSide(
+                          color: _currentTheme.primary,
+                          width: 2,
+                        ),
+                        minimumSize: const Size(double.infinity, 55),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(12),
                         ),
                       ),
-                      child: _isLoading
-                          ? const CircularProgressIndicator(color: Colors.white)
-                          : const Text(
-                              'Send Verification Email',
-                              style: TextStyle(fontSize: 18),
-                            ),
+                      child: const Text(
+                        'Cancel',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
                     ),
                   ],
                 ],

@@ -5,6 +5,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'chat_sceen.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import 'theme_manager.dart';
+import 'setup_analisis_time_manager.dart'; // Add this import
 
 class ChatHistoryScreen extends StatefulWidget {
   final Map<String, dynamic> userData;
@@ -25,11 +27,24 @@ class _ChatHistoryScreenState extends State<ChatHistoryScreen> {
   bool showAnalysis = false;
   bool isAnalyzing = false;
 
+  // Theme variables
+  int _currentThemeIndex = 0;
+  ColorTheme _currentTheme = ThemeManager.colorThemes[0];
+
   @override
   void initState() {
     super.initState();
+    _loadTheme();
     _loadChatHistory();
     _loadUserAnalysis();
+  }
+
+  Future<void> _loadTheme() async {
+    final themeIndex = await ThemeManager.getSelectedThemeIndex();
+    setState(() {
+      _currentThemeIndex = themeIndex;
+      _currentTheme = ThemeManager.getCurrentTheme(themeIndex);
+    });
   }
 
   // Load user analysis from Firestore
@@ -56,17 +71,59 @@ class _ChatHistoryScreenState extends State<ChatHistoryScreen> {
       context: context,
       builder: (BuildContext context) {
         return AlertDialog(
-          title: Text(title),
+          backgroundColor: _currentTheme.containerColor,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+          title: Text(
+            title,
+            style: TextStyle(
+              color: _currentTheme.primary,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
           content: Text(message),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(context).pop(),
-              child: const Text("OK"),
+              child: Text(
+                "OK",
+                style: TextStyle(
+                  color: _currentTheme.primary,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
             ),
           ],
         );
       },
     );
+  }
+
+  // Get messages within selected time range
+  Future<List<String>> _getMessagesInTimeRange() async {
+    final cutoffTimestamp = await AnalysisTimeManager.getCutoffTimestamp();
+    List<String> allMessages = [];
+    int analyzedChatsCount = 0;
+
+    for (var chat in chats) {
+      // Check if chat is within the time range
+      if (chat['timestamp'] >= cutoffTimestamp) {
+        final snapshot = await _db.child('chats/${chat['id']}/messages').once();
+        if (snapshot.snapshot.value != null) {
+          final data = Map<String, dynamic>.from(snapshot.snapshot.value as Map);
+          data.forEach((key, value) {
+            // Check if message is from user and within time range
+            if (value['isUser'] == true && value['timestamp'] >= cutoffTimestamp) {
+              allMessages.add(value['message']);
+            }
+          });
+          analyzedChatsCount++;
+        }
+      }
+    }
+
+    return allMessages;
   }
 
   // Analyze chats to extract user preferences, mental conditions, etc.
@@ -79,28 +136,19 @@ class _ChatHistoryScreenState extends State<ChatHistoryScreen> {
     });
 
     try {
-      // Get all chat messages
-      List<String> allMessages = [];
-      for (var chat in chats) {
-        final snapshot = await _db.child('chats/${chat['id']}/messages').once();
-        if (snapshot.snapshot.value != null) {
-          final data = Map<String, dynamic>.from(snapshot.snapshot.value as Map);
-          data.forEach((key, value) {
-            if (value['isUser'] == true) {
-              allMessages.add(value['message']);
-            }
-          });
-        }
-      }
+      // Get messages within selected time range
+      final allMessages = await _getMessagesInTimeRange();
+      final selectedTime = await AnalysisTimeManager.getSelectedTimeOption();
 
       if (allMessages.isEmpty) {
         setState(() {
           isAnalyzing = false;
         });
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text("No user messages found to analyze"),
-            duration: Duration(seconds: 2),
+          SnackBar(
+            content: Text("No user messages found in the last ${selectedTime.label.toLowerCase()}"),
+            backgroundColor: _currentTheme.primary,
+            duration: const Duration(seconds: 3),
           ),
         );
         return;
@@ -126,7 +174,7 @@ class _ChatHistoryScreenState extends State<ChatHistoryScreen> {
             {
               "parts": [
                 {
-                  "text": "Analyze the following chat messages from a user and provide a comprehensive analysis in JSON format. "
+                  "text": "Analyze the following chat messages from a user from the last ${selectedTime.label.toLowerCase()} and provide a comprehensive analysis in JSON format. "
                       "Include these categories: "
                       "1. preferences (food, colors, hobbies, movies, etc.), "
                       "2. mental_condition (mood patterns, stress indicators, anxiety triggers, etc.), "
@@ -159,16 +207,17 @@ class _ChatHistoryScreenState extends State<ChatHistoryScreen> {
           
           // Extract JSON from the response
           try {
-            // Try to find JSON in the response
             final jsonStart = analysisText.indexOf('{');
             final jsonEnd = analysisText.lastIndexOf('}');
             if (jsonStart >= 0 && jsonEnd > jsonStart) {
               final jsonString = analysisText.substring(jsonStart, jsonEnd + 1);
               final analysisData = jsonDecode(jsonString);
               
-              // Add timestamp and chat count
+              // Add timestamp, chat count and time range info
               analysisData['lastAnalyzed'] = DateTime.now().millisecondsSinceEpoch;
               analysisData['chatsAnalyzed'] = chats.length;
+              analysisData['timeRange'] = selectedTime.label;
+              analysisData['cutoffTimestamp'] = await AnalysisTimeManager.getCutoffTimestamp();
               
               // Save to Firestore
               await _firestore.collection('userAnalysis').doc(user.uid).set(
@@ -185,9 +234,10 @@ class _ChatHistoryScreenState extends State<ChatHistoryScreen> {
               });
               
               ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text("Chat analysis completed successfully"),
-                  duration: Duration(seconds: 2),
+                SnackBar(
+                  content: Text("Chat analysis completed for last ${selectedTime.label.toLowerCase()}"),
+                  backgroundColor: _currentTheme.primary,
+                  duration: const Duration(seconds: 3),
                 ),
               );
             } else {
@@ -227,15 +277,25 @@ class _ChatHistoryScreenState extends State<ChatHistoryScreen> {
     });
   }
 
-  // Check if we should analyze chats (every 5 chats)
-  bool _shouldAnalyzeChats() {
+  // Check if we should analyze chats (based on time range and new content)
+  Future<bool> _shouldAnalyzeChats() async {
     if (chats.isEmpty) return false;
     
     final lastAnalyzed = userAnalysis['lastAnalyzed'] ?? 0;
-    final chatsAnalyzed = userAnalysis['chatsAnalyzed'] ?? 0;
+    final lastCutoff = userAnalysis['cutoffTimestamp'] ?? 0;
+    final currentCutoff = await AnalysisTimeManager.getCutoffTimestamp();
     
-    // Analyze if we have 5 more chats since last analysis
-    return chats.length >= chatsAnalyzed + 5;
+    // Analyze if:
+    // 1. Never analyzed before, OR
+    // 2. Time range has changed, OR
+    // 3. It's been more than 24 hours since last analysis
+    if (userAnalysis.isEmpty) return true;
+    
+    if (lastCutoff != currentCutoff) return true;
+    
+    final lastAnalysisTime = DateTime.fromMillisecondsSinceEpoch(lastAnalyzed);
+    final twentyFourHoursAgo = DateTime.now().subtract(const Duration(hours: 24));
+    return lastAnalysisTime.isBefore(twentyFourHoursAgo);
   }
 
   Future<void> _loadChatHistory() async {
@@ -262,7 +322,7 @@ class _ChatHistoryScreenState extends State<ChatHistoryScreen> {
         });
 
         // Check if we should analyze chats
-        if (_shouldAnalyzeChats()) {
+        if (await _shouldAnalyzeChats()) {
           _analyzeChats();
         }
       } else {
@@ -319,16 +379,34 @@ class _ChatHistoryScreenState extends State<ChatHistoryScreen> {
         context: context,
         builder: (BuildContext context) {
           return AlertDialog(
-            title: const Text("Delete Chat"),
+            backgroundColor: _currentTheme.containerColor,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+            title: Text(
+              "Delete Chat",
+              style: TextStyle(
+                color: _currentTheme.primary,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
             content: const Text("Are you sure you want to delete this chat?"),
             actions: [
               TextButton(
                 onPressed: () => Navigator.of(context).pop(false),
-                child: const Text("Cancel"),
+                child: Text(
+                  "Cancel",
+                  style: TextStyle(
+                    color: _currentTheme.primary,
+                  ),
+                ),
               ),
               TextButton(
                 onPressed: () => Navigator.of(context).pop(true),
-                child: const Text("Delete", style: TextStyle(color: Colors.red)),
+                child: const Text(
+                  "Delete", 
+                  style: TextStyle(color: Colors.red),
+                ),
               ),
             ],
           );
@@ -352,9 +430,10 @@ class _ChatHistoryScreenState extends State<ChatHistoryScreen> {
 
         // Show success message
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text("Chat deleted successfully"),
-            duration: Duration(seconds: 2),
+          SnackBar(
+            content: const Text("Chat deleted successfully"),
+            backgroundColor: _currentTheme.primary,
+            duration: const Duration(seconds: 2),
           ),
         );
       }
@@ -365,10 +444,10 @@ class _ChatHistoryScreenState extends State<ChatHistoryScreen> {
       _loadChatHistory();
       
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text("Failed to delete chat"),
+        SnackBar(
+          content: const Text("Failed to delete chat"),
           backgroundColor: Colors.red,
-          duration: Duration(seconds: 2),
+          duration: const Duration(seconds: 2),
         ),
       );
     }
@@ -384,16 +463,34 @@ class _ChatHistoryScreenState extends State<ChatHistoryScreen> {
         context: context,
         builder: (BuildContext context) {
           return AlertDialog(
-            title: const Text("Delete All Chats"),
+            backgroundColor: _currentTheme.containerColor,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+            title: Text(
+              "Delete All Chats",
+              style: TextStyle(
+                color: _currentTheme.primary,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
             content: const Text("Are you sure you want to delete all chat history?"),
             actions: [
               TextButton(
                 onPressed: () => Navigator.of(context).pop(false),
-                child: const Text("Cancel"),
+                child: Text(
+                  "Cancel",
+                  style: TextStyle(
+                    color: _currentTheme.primary,
+                  ),
+                ),
               ),
               TextButton(
                 onPressed: () => Navigator.of(context).pop(true),
-                child: const Text("Delete All", style: TextStyle(color: Colors.red)),
+                child: const Text(
+                  "Delete All", 
+                  style: TextStyle(color: Colors.red),
+                ),
               ),
             ],
           );
@@ -435,9 +532,10 @@ class _ChatHistoryScreenState extends State<ChatHistoryScreen> {
 
         // Show success message
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text("All chats deleted successfully"),
-            duration: Duration(seconds: 2),
+          SnackBar(
+            content: const Text("All chats deleted successfully"),
+            backgroundColor: _currentTheme.primary,
+            duration: const Duration(seconds: 2),
           ),
         );
       }
@@ -462,6 +560,30 @@ class _ChatHistoryScreenState extends State<ChatHistoryScreen> {
     return '${date.day}/${date.month}/${date.year} ${date.hour}:${date.minute.toString().padLeft(2, '0')}';
   }
 
+  // Show current analysis time range info
+  Widget _buildAnalysisTimeInfo() {
+    return FutureBuilder<AnalysisTimeOption>(
+      future: AnalysisTimeManager.getSelectedTimeOption(),
+      builder: (context, snapshot) {
+        if (snapshot.hasData) {
+          return Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+            child: Text(
+              "Analysis includes chats from last ${snapshot.data!.label.toLowerCase()}",
+              style: TextStyle(
+                fontSize: 12,
+                color: _currentTheme.primary.withOpacity(0.8),
+                fontStyle: FontStyle.italic,
+              ),
+              textAlign: TextAlign.center,
+            ),
+          );
+        }
+        return const SizedBox();
+      },
+    );
+  }
+
   // Widget to display analysis results
   Widget _buildAnalysisSection() {
     if (!showAnalysis || userAnalysis.isEmpty) {
@@ -470,15 +592,30 @@ class _ChatHistoryScreenState extends State<ChatHistoryScreen> {
 
     return Card(
       margin: const EdgeInsets.all(8.0),
+      color: _currentTheme.containerColor,
+      elevation: 4,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+      ),
       child: Column(
         children: [
           ListTile(
-            title: const Text(
+            title: Text(
               "Chat Analysis Insights",
-              style: TextStyle(fontWeight: FontWeight.bold, color: Colors.blue),
+              style: TextStyle(
+                fontWeight: FontWeight.bold, 
+                color: _currentTheme.primary,
+                fontSize: 18,
+              ),
             ),
+            subtitle: userAnalysis['timeRange'] != null 
+                ? Text(
+                    "Based on last ${userAnalysis['timeRange']}",
+                    style: const TextStyle(fontSize: 12),
+                  )
+                : null,
             trailing: IconButton(
-              icon: const Icon(Icons.close),
+              icon: Icon(Icons.close, color: _currentTheme.primary),
               onPressed: () {
                 setState(() {
                   showAnalysis = false;
@@ -486,11 +623,11 @@ class _ChatHistoryScreenState extends State<ChatHistoryScreen> {
               },
             ),
           ),
-          const Divider(),
+          Divider(color: _currentTheme.primary.withOpacity(0.3)),
           SizedBox(
-            height: 400, // Fixed height to ensure scroll works
+            height: 400,
             child: SingleChildScrollView(
-              padding: const EdgeInsets.all(8.0),
+              padding: const EdgeInsets.all(16.0),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -500,14 +637,22 @@ class _ChatHistoryScreenState extends State<ChatHistoryScreen> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Text(
+                          Text(
                             "Summary:",
-                            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold, 
+                              fontSize: 16,
+                              color: _currentTheme.primary,
+                            ),
                           ),
                           const SizedBox(height: 8),
                           Text(
                             userAnalysis['summary'],
-                            style: const TextStyle(fontStyle: FontStyle.italic, fontSize: 14),
+                            style: const TextStyle(
+                              fontStyle: FontStyle.italic, 
+                              fontSize: 14,
+                              color: Colors.black87,
+                            ),
                           ),
                         ],
                       ),
@@ -547,10 +692,23 @@ class _ChatHistoryScreenState extends State<ChatHistoryScreen> {
             ),
           ),
           Padding(
-            padding: const EdgeInsets.all(8.0),
+            padding: const EdgeInsets.all(16.0),
             child: ElevatedButton(
               onPressed: _analyzeChats,
-              child: const Text("Update Analysis"),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: _currentTheme.primary,
+                foregroundColor: Colors.black,
+                minimumSize: const Size(double.infinity, 50),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+              child: const Text(
+                "Update Analysis",
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
             ),
           ),
         ],
@@ -566,24 +724,36 @@ class _ChatHistoryScreenState extends State<ChatHistoryScreen> {
         children: [
           Text(
             "$title:",
-            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+            style: TextStyle(
+              fontWeight: FontWeight.bold, 
+              fontSize: 16,
+              color: _currentTheme.primary,
+            ),
           ),
           const SizedBox(height: 8),
           if (data is String)
-            Text(data, style: const TextStyle(fontSize: 14)),
+            Text(
+              data, 
+              style: const TextStyle(fontSize: 14, color: Colors.black87),
+            ),
           if (data is Map)
             ...data.entries.map<Widget>((entry) {
               return Padding(
                 padding: const EdgeInsets.only(bottom: 4.0),
-                child: Text("• ${entry.key}: ${entry.value}", 
-                  style: const TextStyle(fontSize: 14)),
+                child: Text(
+                  "• ${entry.key}: ${entry.value}", 
+                  style: const TextStyle(fontSize: 14, color: Colors.black87),
+                ),
               );
             }).toList(),
           if (data is List)
             ...data.map<Widget>((item) {
               return Padding(
                 padding: const EdgeInsets.only(bottom: 4.0),
-                child: Text("• $item", style: const TextStyle(fontSize: 14)),
+                child: Text(
+                  "• $item", 
+                  style: const TextStyle(fontSize: 14, color: Colors.black87),
+                ),
               );
             }).toList(),
         ],
@@ -596,116 +766,183 @@ class _ChatHistoryScreenState extends State<ChatHistoryScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text("Chat History"),
-        backgroundColor: const Color(0xFF2196F3),
-        foregroundColor: Colors.white,
+        backgroundColor: _currentTheme.primary,
+        foregroundColor: Colors.black,
+        elevation: 2,
+        shadowColor: _currentTheme.primary.withOpacity(0.5),
         actions: [
           if (chats.isNotEmpty)
             IconButton(
-              icon: const Icon(Icons.analytics),
+              icon: Icon(Icons.analytics, color: Colors.black),
               onPressed: _analyzeChats,
               tooltip: "Analyze Chats",
             ),
           if (chats.isNotEmpty)
             IconButton(
-              icon: const Icon(Icons.delete_forever),
+              icon: Icon(Icons.settings, color: Colors.black),
+              onPressed: () {
+                Navigator.pushNamed(context, '/analysisSettings');
+              },
+              tooltip: "Analysis Settings",
+            ),
+          if (chats.isNotEmpty)
+            IconButton(
+              icon: Icon(Icons.delete_forever, color: Colors.black),
               onPressed: _deleteAllChats,
               tooltip: "Delete All Chats",
             ),
         ],
       ),
-      body: isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : chats.isEmpty
-              ? const Center(
-                  child: Text(
-                    "No chat history yet",
-                    style: TextStyle(fontSize: 18),
-                  ),
-                )
-              : Column(
-                  children: [
-                    if (isAnalyzing)
-                      const LinearProgressIndicator(
-                        backgroundColor: Colors.white,
-                        valueColor: AlwaysStoppedAnimation<Color>(Colors.blue),
-                      ),
-                    if (showAnalysis) _buildAnalysisSection(),
-                    if (!showAnalysis && chats.isNotEmpty)
-                      Padding(
-                        padding: const EdgeInsets.all(8.0),
-                        child: ElevatedButton(
-                          onPressed: _analyzeChats,
-                          child: const Text("Analyze My Chats"),
+      body: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: [_currentTheme.gradientStart, _currentTheme.gradientEnd],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+        ),
+        child: isLoading
+            ? Center(
+                child: CircularProgressIndicator(
+                  color: _currentTheme.primary,
+                ),
+              )
+            : chats.isEmpty
+                ? Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.chat_bubble_outline,
+                          size: 64,
+                          color: _currentTheme.primary,
                         ),
-                      ),
-                    Expanded(
-                      child: ListView.builder(
-                        itemCount: chats.length,
-                        itemBuilder: (context, index) {
-                          final chat = chats[index];
-                          return Dismissible(
-                            key: Key(chat['id']),
-                            background: Container(
-                              color: Colors.red,
-                              alignment: Alignment.centerRight,
-                              padding: const EdgeInsets.only(right: 20),
-                              child: const Icon(Icons.delete, color: Colors.white),
-                            ),
-                            direction: DismissDirection.endToStart,
-                            confirmDismiss: (direction) async {
-                              return await showDialog(
-                                context: context,
-                                builder: (BuildContext context) {
-                                  return AlertDialog(
-                                    title: const Text("Delete Chat"),
-                                    content: const Text("Are you sure you want to delete this chat?"),
-                                    actions: [
-                                      TextButton(
-                                        onPressed: () => Navigator.of(context).pop(false),
-                                        child: const Text("Cancel"),
+                        const SizedBox(height: 16),
+                        Text(
+                          "No chat history yet",
+                          style: TextStyle(
+                            fontSize: 18,
+                            color: _currentTheme.primary,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          "Start a conversation with Ikri to see your chat history here",
+                          style: TextStyle(
+                            fontSize: 14,
+                            color: Colors.black54,
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                      ],
+                    ),
+                  )
+                : Column(
+                    children: [
+                      if (isAnalyzing)
+                        LinearProgressIndicator(
+                          backgroundColor: _currentTheme.containerColor,
+                          valueColor: AlwaysStoppedAnimation<Color>(_currentTheme.primary),
+                        ),
+                      _buildAnalysisTimeInfo(),
+                      if (showAnalysis) _buildAnalysisSection(),
+                      if (!showAnalysis && chats.isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.all(16.0),
+                          child: Column(
+                            children: [
+                              ElevatedButton(
+                                onPressed: _analyzeChats,
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: _currentTheme.primary,
+                                  foregroundColor: Colors.black,
+                                  minimumSize: const Size(double.infinity, 50),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                ),
+                                child: const Text(
+                                  "Analyze My Chats",
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              TextButton(
+                                onPressed: () {
+                                  Navigator.pushNamed(context, '/analysisSettings');
+                                },
+                                child: Text(
+                                  "Adjust Analysis Time Range",
+                                  style: TextStyle(
+                                    color: _currentTheme.primary,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      Expanded(
+                        child: ListView.builder(
+                          itemCount: chats.length,
+                          itemBuilder: (context, index) {
+                            final chat = chats[index];
+                            return Card(
+                              margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                              color: _currentTheme.containerColor,
+                              elevation: 2,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: ListTile(
+                                leading: Icon(
+                                  Icons.chat,
+                                  color: _currentTheme.primary,
+                                ),
+                                title: Text(
+                                  chat['lastMessage'],
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                                subtitle: Text(
+                                  _formatTimestamp(chat['timestamp']),
+                                  style: TextStyle(
+                                    color: Colors.black54,
+                                  ),
+                                ),
+                                trailing: IconButton(
+                                  icon: Icon(
+                                    Icons.delete,
+                                    color: Colors.red,
+                                    size: 20,
+                                  ),
+                                  onPressed: () => _deleteChat(chat['id'], index),
+                                ),
+                                onTap: () {
+                                  Navigator.pushReplacement(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (context) => ChatScreen(
+                                        userData: widget.userData,
+                                        chatId: chat['id'],
                                       ),
-                                      TextButton(
-                                        onPressed: () => Navigator.of(context).pop(true),
-                                        child: const Text("Delete", style: TextStyle(color: Colors.red)),
-                                      ),
-                                    ],
+                                    ),
                                   );
                                 },
-                              );
-                            },
-                            onDismissed: (direction) {
-                              _deleteChat(chat['id'], index);
-                            },
-                            child: ListTile(
-                              leading: const Icon(Icons.chat, color: Color(0xFF2196F3)),
-                              title: Text(
-                                chat['lastMessage'],
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
                               ),
-                              subtitle: Text(_formatTimestamp(chat['timestamp'])),
-                              trailing: IconButton(
-                                icon: const Icon(Icons.delete, color: Colors.red, size: 20),
-                                onPressed: () => _deleteChat(chat['id'], index),
-                              ),
-                              onTap: () {
-                                Navigator.pushReplacement(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (context) => ChatScreen(
-                                      userData: widget.userData,
-                                      chatId: chat['id'],
-                                    ),
-                                  ),
-                                );
-                              },
-                            ),
-                          );
-                        },
+                            );
+                          },
+                        ),
                       ),
-                    ),
-                  ],
-                ),
+                    ],
+                  ),
+      ),
     );
   }
 }
