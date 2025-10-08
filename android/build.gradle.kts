@@ -2,6 +2,23 @@ plugins {
     id("com.google.gms.google-services") version "4.3.15" apply false
 }
 
+buildscript {
+    extra.apply {
+        set("kotlin_version", "1.9.10")
+    }
+    repositories {
+        google()
+        mavenCentral()
+    }
+    dependencies {
+        //classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:${extra["kotlin_version"]}")
+        classpath("com.android.tools.build:gradle:8.1.4")
+        classpath("com.google.gms:google-services:4.4.0")
+        classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:1.9.10")
+        // ... other classpaths
+    }
+}
+
 allprojects {
     repositories {
         google()

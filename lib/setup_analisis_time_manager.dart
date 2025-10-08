@@ -7,15 +7,14 @@ class AnalysisTimeManager {
 
   // Available time options for analysis
   static final List<AnalysisTimeOption> timeOptions = [
-    AnalysisTimeOption('30 Minutes', 30),
-    AnalysisTimeOption('1 Hour', 60),
-    AnalysisTimeOption('2 Hours', 120),
-    AnalysisTimeOption('6 Hours', 360),
     AnalysisTimeOption('12 Hours', 720),
     AnalysisTimeOption('1 Day', 1440),
-    AnalysisTimeOption('2 Days', 2880),
     AnalysisTimeOption('3 Days', 4320),
     AnalysisTimeOption('5 Days', 7200),
+    AnalysisTimeOption('7 Days', 10080),
+    AnalysisTimeOption('15 Days', 21600),
+    AnalysisTimeOption('30 Days', 43200),
+
   ];
 
   // Get currently selected time in minutes

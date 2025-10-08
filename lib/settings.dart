@@ -6,7 +6,11 @@ import 'home_screen.dart';
 import 'exercise_screen.dart';
 import 'chat_sceen.dart';
 import 'theme_manager.dart';
-import 'setup_analisis_time_manager.dart'; // Add this import
+import 'setup_analisis_time_manager.dart';
+
+// Add these imports for notifications
+import 'notification_time_manager.dart';
+import 'notification_service.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -26,11 +30,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
   int _currentThemeIndex = 0;
   ColorTheme _currentTheme = ThemeManager.colorThemes[0];
 
+  // Notification variables
+  bool _notificationsEnabled = true;
+
   @override
   void initState() {
     super.initState();
     _loadTheme();
     _getUserData();
+    _loadNotificationSettings();
   }
 
   Future<void> _loadTheme() async {
@@ -38,6 +46,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
     setState(() {
       _currentThemeIndex = themeIndex;
       _currentTheme = ThemeManager.getCurrentTheme(themeIndex);
+    });
+  }
+
+  Future<void> _loadNotificationSettings() async {
+    final enabled = await NotificationTimeManager.getNotificationsEnabled();
+    setState(() {
+      _notificationsEnabled = enabled;
     });
   }
 
@@ -124,11 +139,63 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
+  // Show Notification Time Settings
+  Future<void> _showNotificationTimeSettings() async {
+    final result = await showDialog(
+      context: context,
+      builder: (context) => NotificationTimeSettingsDialog(primaryColor: _currentTheme.primary),
+    );
+    
+    if (result == true) {
+      // Update scheduled notifications when settings are saved
+      await NotificationService.updateScheduledNotifications();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text("Notification settings updated"),
+          backgroundColor: _currentTheme.primary,
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    }
+  }
+
+  // Toggle notifications on/off
+  Future<void> _toggleNotifications(bool enabled) async {
+    await NotificationTimeManager.setNotificationsEnabled(enabled);
+    setState(() {
+      _notificationsEnabled = enabled;
+    });
+    
+    // Update scheduled notifications
+    if (enabled) {
+      await NotificationService.updateScheduledNotifications();
+    } else {
+      await NotificationService.cancelAllScheduledNotifications();
+    }
+    
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(enabled ? "Notifications enabled" : "Notifications disabled"),
+        backgroundColor: _currentTheme.primary,
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final List<Map<String, dynamic>> settingsOptions = [
       {"icon": Icons.analytics, "title": "Chat Analysis Settings", "onTap": _showAnalysisTimeSettings},
-      {"icon": Icons.notifications, "title": "Notifications", "route": "/notifications"},
+      {
+        "icon": Icons.notifications, 
+        "title": "Notifications", 
+        "onTap": _showNotificationTimeSettings,
+        "trailing": Switch(
+          value: _notificationsEnabled,
+          onChanged: _toggleNotifications,
+          activeColor: _currentTheme.primary,
+        ),
+      },
       {"icon": Icons.color_lens, "title": "Appearance", "route": "/appearance"},
       {"icon": Icons.help_outline, "title": "Help & Support", "route": "/help"},
       {"icon": Icons.lock_outline, "title": "Privacy & Safety", "route": "/privacy"},
@@ -281,6 +348,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                       return const SizedBox();
                                     },
                                   ),
+                                  Text(
+                                    "Notifications: ${_notificationsEnabled ? 'Enabled' : 'Disabled'}",
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: _currentTheme.primary,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
                                 ],
                               ),
                             ),
@@ -319,7 +394,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             fontWeight: FontWeight.w500,
                           ),
                         ),
-                        trailing: Icon(Icons.arrow_forward_ios, size: 16, color: _currentTheme.primary),
+                        trailing: option["trailing"] ?? Icon(Icons.arrow_forward_ios, size: 16, color: _currentTheme.primary),
                         onTap: () {
                           if (option["onTap"] != null) {
                             option["onTap"]();
@@ -407,7 +482,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                        Navigator.push(
                           context,
                           MaterialPageRoute(
-                            builder: (context) => RecommendationsScreen(p_userData: _userData, userId: 'AYPqR0TqB4cjbZeofNIPYAOTtWO2'),
+                            builder: (context) => RecommendationsScreen(p_userData: _userData, userId: _currentUser?.uid ?? 'default_user_id'),
                           ),
                         );
                       },
@@ -488,408 +563,251 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 }
 
-// 🔹 Appearance Settings Screen
-class AppearanceSettingsScreen extends StatefulWidget {
-  const AppearanceSettingsScreen({super.key});
+// Add this new dialog for notification time settings
+class NotificationTimeSettingsDialog extends StatefulWidget {
+  final Color primaryColor;
+  
+  const NotificationTimeSettingsDialog({
+    super.key,
+    required this.primaryColor,
+  });
 
   @override
-  State<AppearanceSettingsScreen> createState() => _AppearanceSettingsScreenState();
+  State<NotificationTimeSettingsDialog> createState() => _NotificationTimeSettingsDialogState();
 }
 
-class _AppearanceSettingsScreenState extends State<AppearanceSettingsScreen> {
-  int _selectedThemeIndex = 0;
+class _NotificationTimeSettingsDialogState extends State<NotificationTimeSettingsDialog> {
+  List<NotificationTimeOption> _notificationTimes = [];
+  bool _isLoading = true;
 
   @override
   void initState() {
     super.initState();
-    _loadSelectedTheme();
+    _loadNotificationTimes();
   }
 
-  Future<void> _loadSelectedTheme() async {
-    final index = await ThemeManager.getSelectedThemeIndex();
+  Future<void> _loadNotificationTimes() async {
+    final times = await NotificationTimeManager.getNotificationTimes();
     setState(() {
-      _selectedThemeIndex = index;
+      _notificationTimes = times;
+      _isLoading = false;
     });
   }
 
-  Future<void> _selectTheme(int index) async {
-    await ThemeManager.saveSelectedTheme(index);
-    setState(() {
-      _selectedThemeIndex = index;
-    });
-    
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('${ThemeManager.colorThemes[index].name} theme selected'),
-        duration: const Duration(seconds: 2),
-        backgroundColor: ThemeManager.colorThemes[index].primary,
-      ),
+  Future<void> _addNewNotificationTime() async {
+    final TimeOfDay? selectedTime = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.now(),
+      builder: (BuildContext context, Widget? child) {
+        return Theme(
+          data: ThemeData.light().copyWith(
+            colorScheme: ColorScheme.light(
+              primary: widget.primaryColor,
+            ),
+          ),
+          child: child!,
+        );
+      },
     );
+
+    if (selectedTime != null) {
+      final newTime = NotificationTimeOption(
+        label: _getTimeLabel(selectedTime),
+        time: selectedTime,
+        enabled: true,
+      );
+      
+      await NotificationTimeManager.addNotificationTime(newTime);
+      await _loadNotificationTimes();
+      
+      // Update scheduled notifications
+      await NotificationService.updateScheduledNotifications();
+    }
+  }
+
+  String _getTimeLabel(TimeOfDay time) {
+    if (time.hour < 12) {
+      return '🌅';
+    } else if (time.hour < 17) {
+      return '☀️';
+    } else {
+      return '🌇';
+    }
+  }
+
+  String _formatTime(TimeOfDay time) {
+    final hour = time.hourOfPeriod;
+    final minute = time.minute.toString().padLeft(2, '0');
+    final period = time.period == DayPeriod.am ? 'AM' : 'PM';
+    return '$hour:$minute $period';
+  }
+
+  Future<void> _toggleNotification(int index, bool enabled) async {
+    final updatedTime = NotificationTimeOption(
+      label: _notificationTimes[index].label,
+      time: _notificationTimes[index].time,
+      enabled: enabled,
+    );
+    
+    await NotificationTimeManager.updateNotificationTime(index, updatedTime);
+    await _loadNotificationTimes();
+    
+    // Update scheduled notifications
+    await NotificationService.updateScheduledNotifications();
+  }
+
+  Future<void> _editNotificationTime(int index) async {
+    final currentTime = _notificationTimes[index].time;
+    final TimeOfDay? selectedTime = await showTimePicker(
+      context: context,
+      initialTime: currentTime,
+      builder: (BuildContext context, Widget? child) {
+        return Theme(
+          data: ThemeData.light().copyWith(
+            colorScheme: ColorScheme.light(
+              primary: widget.primaryColor,
+            ),
+          ),
+          child: child!,
+        );
+      },
+    );
+
+    if (selectedTime != null) {
+      final updatedTime = NotificationTimeOption(
+        label: _getTimeLabel(selectedTime),
+        time: selectedTime,
+        enabled: _notificationTimes[index].enabled,
+      );
+      
+      await NotificationTimeManager.updateNotificationTime(index, updatedTime);
+      await _loadNotificationTimes();
+      
+      // Update scheduled notifications
+      await NotificationService.updateScheduledNotifications();
+    }
+  }
+
+  Future<void> _deleteNotificationTime(int index) async {
+    await NotificationTimeManager.removeNotificationTime(index);
+    await _loadNotificationTimes();
+    
+    // Update scheduled notifications
+    await NotificationService.updateScheduledNotifications();
   }
 
   @override
   Widget build(BuildContext context) {
-    final currentTheme = ThemeManager.getCurrentTheme(_selectedThemeIndex);
-
-    return Scaffold(
-      body: Container(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            colors: [currentTheme.gradientStart, currentTheme.gradientEnd],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-          ),
+    return AlertDialog(
+      backgroundColor: Colors.white,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+      ),
+      title: Text(
+        'Notification Settings',
+        style: TextStyle(
+          color: widget.primaryColor,
+          fontWeight: FontWeight.bold,
         ),
-        child: SafeArea(
-          child: Column(
-            children: [
-              // Top Bar
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                decoration: BoxDecoration(
-                  border: Border(
-                    bottom: BorderSide(color: currentTheme.primary, width: 2),
-                  ),
-                  color: currentTheme.primary,
-                ),
-                child: Row(
-                  children: [
-                    IconButton(
-                      icon: const Icon(Icons.arrow_back, size: 28, color: Colors.black),
-                      onPressed: () {
-                        Navigator.pop(context);
-                      },
+      ),
+      content: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : SizedBox(
+              width: double.maxFinite,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    'Schedule your daily motivational notifications',
+                    style: TextStyle(
+                      color: Colors.grey[600],
                     ),
-                    const SizedBox(width: 8),
-                    const Text(
-                      "Appearance Settings",
-                      style: TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.black,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-
-              const SizedBox(height: 20),
-
-              // Current Theme Preview
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: Card(
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
                   ),
-                  color: currentTheme.containerColor,
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      children: [
-                        Text(
-                          'Current Theme: ${currentTheme.name}',
-                          style: const TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        const SizedBox(height: 10),
-                        Container(
-                          height: 60,
-                          decoration: BoxDecoration(
-                            gradient: LinearGradient(
-                              colors: [currentTheme.gradientStart, currentTheme.gradientEnd],
-                              begin: Alignment.centerLeft,
-                              end: Alignment.centerRight,
-                            ),
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: currentTheme.primary),
-                          ),
-                          child: Center(
+                  const SizedBox(height: 16),
+                  // Fixed: Added scrollable content with limited height
+                  ConstrainedBox(
+                    constraints: BoxConstraints(
+                      maxHeight: MediaQuery.of(context).size.height * 0.4,
+                    ),
+                    child: _notificationTimes.isEmpty
+                        ? Padding(
+                            padding: const EdgeInsets.all(16.0),
                             child: Text(
-                              'Preview',
+                              'No notification times added yet',
                               style: TextStyle(
-                                color: Colors.black,
-                                fontWeight: FontWeight.bold,
+                                color: Colors.grey[600],
+                                fontStyle: FontStyle.italic,
                               ),
                             ),
+                          )
+                        : ListView.builder(
+                            shrinkWrap: true,
+                            itemCount: _notificationTimes.length,
+                            itemBuilder: (context, index) {
+                              final timeOption = _notificationTimes[index];
+                              
+                              return Card(
+                                margin: const EdgeInsets.symmetric(vertical: 4),
+                                child: ListTile(
+                                  leading: Icon(
+                                    Icons.access_time,
+                                    color: widget.primaryColor,
+                                  ),
+                                  title: Text(timeOption.label),
+                                  subtitle: Text(_formatTime(timeOption.time)),
+                                  trailing: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Switch(
+                                        value: timeOption.enabled,
+                                        onChanged: (value) => _toggleNotification(index, value),
+                                        activeColor: widget.primaryColor,
+                                      ),
+                                      IconButton(
+                                        icon: Icon(Icons.edit, color: widget.primaryColor),
+                                        onPressed: () => _editNotificationTime(index),
+                                      ),
+                                      if (_notificationTimes.length > 1)
+                                        IconButton(
+                                          icon: const Icon(Icons.delete, color: Colors.red),
+                                          onPressed: () => _deleteNotificationTime(index),
+                                        ),
+                                    ],
+                                  ),
+                                ),
+                              );
+                            },
                           ),
-                        ),
-                      ],
+                  ),
+                  const SizedBox(height: 16),
+                  ElevatedButton.icon(
+                    icon: const Icon(Icons.add),
+                    label: const Text('Add New Time'),
+                    onPressed: _addNewNotificationTime,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: widget.primaryColor,
+                      foregroundColor: Colors.white,
                     ),
                   ),
-                ),
+                ],
               ),
-
-              const SizedBox(height: 20),
-
-              // Theme Selection List
-              Expanded(
-                child: ListView.builder(
-                  itemCount: ThemeManager.colorThemes.length,
-                  itemBuilder: (context, index) {
-                    final theme = ThemeManager.colorThemes[index];
-                    return Card(
-                      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      color: theme.containerColor,
-                      child: ListTile(
-                        leading: Container(
-                          width: 40,
-                          height: 40,
-                          decoration: BoxDecoration(
-                            gradient: LinearGradient(
-                              colors: [theme.gradientStart, theme.gradientEnd],
-                              begin: Alignment.topLeft,
-                              end: Alignment.bottomRight,
-                            ),
-                            shape: BoxShape.circle,
-                          ),
-                        ),
-                        title: Text(
-                          theme.name,
-                          style: const TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                        trailing: _selectedThemeIndex == index
-                            ? Icon(Icons.check_circle, color: theme.primary)
-                            : Icon(Icons.radio_button_unchecked, color: theme.primary),
-                        onTap: () => _selectTheme(index),
-                      ),
-                    );
-                  },
-                ),
-              ),
-            ],
+            ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(false),
+          child: const Text('Cancel'),
+        ),
+        ElevatedButton(
+          onPressed: () {
+            Navigator.of(context).pop(true);
+          },
+          style: ElevatedButton.styleFrom(
+            backgroundColor: widget.primaryColor,
+            foregroundColor: Colors.white,
           ),
+          child: const Text('Save'),
         ),
-      ),
-    );
-  }
-}
-
-// 🔹 Analysis Time Settings Screen
-class AnalysisTimeSettingsScreen extends StatefulWidget {
-  const AnalysisTimeSettingsScreen({super.key});
-
-  @override
-  State<AnalysisTimeSettingsScreen> createState() => _AnalysisTimeSettingsScreenState();
-}
-
-class _AnalysisTimeSettingsScreenState extends State<AnalysisTimeSettingsScreen> {
-  late AnalysisTimeOption _selectedOption;
-  late ColorTheme _currentTheme;
-
-  @override
-  void initState() {
-    super.initState();
-    _loadThemeAndSelectedOption();
-  }
-
-  Future<void> _loadThemeAndSelectedOption() async {
-    final themeIndex = await ThemeManager.getSelectedThemeIndex();
-    final selectedOption = await AnalysisTimeManager.getSelectedTimeOption();
-    
-    setState(() {
-      _currentTheme = ThemeManager.getCurrentTheme(themeIndex);
-      _selectedOption = selectedOption;
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      body: Container(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            colors: [_currentTheme.gradientStart, _currentTheme.gradientEnd],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-          ),
-        ),
-        child: SafeArea(
-          child: Column(
-            children: [
-              // Top Bar
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                decoration: BoxDecoration(
-                  border: Border(
-                    bottom: BorderSide(color: _currentTheme.primary, width: 2),
-                  ),
-                  color: _currentTheme.primary,
-                ),
-                child: Row(
-                  children: [
-                    IconButton(
-                      icon: const Icon(Icons.arrow_back, size: 28, color: Colors.black),
-                      onPressed: () {
-                        Navigator.pop(context);
-                      },
-                    ),
-                    const SizedBox(width: 8),
-                    const Text(
-                      "Chat Analysis Settings",
-                      style: TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.black,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-
-              const SizedBox(height: 20),
-
-              // Current Selection Info
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: Card(
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  color: _currentTheme.containerColor,
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      children: [
-                        const Text(
-                          'Current Analysis Time Range',
-                          style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        const SizedBox(height: 10),
-                        Text(
-                          _selectedOption.label,
-                          style: TextStyle(
-                            fontSize: 16,
-                            color: _currentTheme.primary,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        const Text(
-                          'This determines how far back in time your chat analysis will include.',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            fontSize: 14,
-                            color: Colors.grey,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-
-              const SizedBox(height: 20),
-
-              // Time Options List
-              Expanded(
-                child: ListView.builder(
-                  itemCount: AnalysisTimeManager.timeOptions.length,
-                  itemBuilder: (context, index) {
-                    final option = AnalysisTimeManager.timeOptions[index];
-                    return Card(
-                      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      color: _currentTheme.containerColor,
-                      child: ListTile(
-                        leading: Icon(
-                          Icons.access_time,
-                          color: _currentTheme.primary,
-                        ),
-                        title: Text(
-                          option.label,
-                          style: const TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                        trailing: _selectedOption == option
-                            ? Icon(Icons.check_circle, color: _currentTheme.primary)
-                            : Icon(Icons.radio_button_unchecked, color: _currentTheme.primary),
-                        onTap: () async {
-                          await AnalysisTimeManager.setSelectedTimeInMinutes(option.minutes);
-                          setState(() {
-                            _selectedOption = option;
-                          });
-                          
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text('Analysis time range set to ${option.label}'),
-                              backgroundColor: _currentTheme.primary,
-                              duration: const Duration(seconds: 2),
-                            ),
-                          );
-                        },
-                      ),
-                    );
-                  },
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-// 🔹 Dummy Pages for Navigation
-class DummyPage extends StatelessWidget {
-  final String title;
-  const DummyPage({super.key, required this.title});
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: Text(title)),
-      body: Center(
-        child: Text(
-          "This is the $title Page",
-          style: const TextStyle(fontSize: 22),
-        ),
-      ),
-    );
-  }
-}
-
-void main() {
-  runApp(const MyApp());
-}
-
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      debugShowCheckedModeBanner: false,
-      routes: {
-        "/": (context) => const SettingsScreen(),
-        "/menu": (context) => const DummyPage(title: "Menu"),
-        "/notifications": (context) => const DummyPage(title: "Notifications"),
-        "/help": (context) => const DummyPage(title: "Help & Support"),
-        "/privacy": (context) => const DummyPage(title: "Privacy & Safety"),
-        "/about": (context) => const DummyPage(title: "About"),
-        "/home": (context) => const DummyPage(title: "Home"),
-        "/exercise": (context) => const DummyPage(title: "Exercise"),
-        "/chat": (context) => const DummyPage(title: "Chat"),
-        "/profile": (context) => const DummyPage(title: "Profile"),
-        "/appearance": (context) => const AppearanceSettingsScreen(),
-        "/analysisSettings": (context) => const AnalysisTimeSettingsScreen(), // New route
-      },
+      ],
     );
   }
 }
