@@ -458,7 +458,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           context,
                           MaterialPageRoute(
                             builder: (context) => RecommendationsScreen(
-                              p_userData: _userData, 
+                              pUserData: _userData, 
                               userId: _currentUser?.uid ?? 'AYPqR0TqB4cjbZeofNIPYAOTtWO2'
                             ),
                           ),

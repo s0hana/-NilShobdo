@@ -181,6 +181,7 @@ class _ChatHistoryScreenState extends State<ChatHistoryScreen> {
                       "3. interests (topics they frequently discuss), "
                       "4. dislikes (things they express negative feelings about), "
                       "5. summary (overall analysis summary). "
+                      "if the chat contains emojis then convert those emojis to text, like: 🍕: pizza"
                       "Format the response as valid JSON with these exact keys. "
                       "Here are the messages: $combinedMessages"
                 }

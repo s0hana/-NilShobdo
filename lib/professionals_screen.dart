@@ -1,5 +1,12 @@
 import 'package:flutter/material.dart';
-import 'theme_manager.dart'; // Theme manager import করুন
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_database/firebase_database.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'dart:convert';
+import 'home_screen.dart';
+import 'chat_sceen.dart';
+import 'exercise_screen.dart';
+import 'theme_manager.dart';
 
 class MentalHealthProfessionalsPage extends StatefulWidget {
   const MentalHealthProfessionalsPage({super.key});
@@ -12,11 +19,26 @@ class _MentalHealthProfessionalsPageState extends State<MentalHealthProfessional
   // Theme variables
   int _currentThemeIndex = 0;
   ColorTheme _currentTheme = ThemeManager.colorThemes[0];
+  
+  // Firebase instances
+  final FirebaseAuth _auth = FirebaseAuth.instance;
+  final FirebaseDatabase _database = FirebaseDatabase.instance;
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  
+  // Data variables
+  List<Map<String, dynamic>> doctors = [];
+  List<Map<String, dynamic>> organizations = [];
+  Map<String, dynamic> _userData = {};
+  User? _currentUser;
+  bool _isLoading = true;
+  bool _showDoctors = true; // Toggle between doctors and organizations
 
   @override
   void initState() {
     super.initState();
     _loadTheme();
+    _getUserData();
+    _fetchProfessionals();
   }
 
   Future<void> _loadTheme() async {
@@ -27,65 +49,133 @@ class _MentalHealthProfessionalsPageState extends State<MentalHealthProfessional
     });
   }
 
-  // Dummy professional list
-  final List<Map<String, dynamic>> professionals = [
-    {
-      "photo": "assets/gtp.png",
-      "name": "Dr. Sarah Khan",
-      "specialization": "Clinical Psychologist",
-      "description": "Expert in anxiety and depression management.",
-      "contact": "01711111111",
-      "experience": "8 years",
-      "rating": "4.8",
-    },
-    {
-      "photo": "assets/gtp.png",
-      "name": "Dr. Amin Rahman",
-      "specialization": "Psychotherapist",
-      "description": "Focus on cognitive behavioral therapy (CBT).",
-      "contact": "01711111111",
-      "experience": "6 years",
-      "rating": "4.7",
-    },
-    {
-      "photo": "assets/gtp.png",
-      "name": "Dr. Fatima Noor",
-      "specialization": "Child Psychologist",
-      "description": "Specializes in child and adolescent mental health.",
-      "contact": "01711111111",
-      "experience": "10 years",
-      "rating": "4.9",
-    },
-    {
-      "photo": "assets/gtp.png",
-      "name": "Dr. Aklima Akter",
-      "specialization": "Child Psychologist",
-      "description": "Focus on cognitive behavioral therapy (CBT).",
-      "contact": "01711111111",
-      "experience": "7 years",
-      "rating": "4.6",
-    },
-    {
-      "photo": "assets/gtp.png",
-      "name": "Dr. Rahim Islam",
-      "specialization": "Family Therapist",
-      "description": "Specializes in family and relationship counseling.",
-      "contact": "01711111111",
-      "experience": "9 years",
-      "rating": "4.8",
-    },
-    {
-      "photo": "assets/gtp.png",
-      "name": "Dr. Nusrat Jahan",
-      "specialization": "Trauma Specialist",
-      "description": "Expert in PTSD and trauma recovery.",
-      "contact": "01711111111",
-      "experience": "12 years",
-      "rating": "4.9",
-    },
-  ];
+  Future<void> _getUserData() async {
+    try {
+      _currentUser = _auth.currentUser;
+      if (_currentUser != null) {
+        DocumentSnapshot userDoc = await _firestore
+            .collection('users')
+            .doc(_currentUser!.uid)
+            .get();
+            
+        if (userDoc.exists) {
+          setState(() {
+            _userData = userDoc.data() as Map<String, dynamic>;
+          });
+        } else {
+          // If user document doesn't exist, create one with basic data
+          await _firestore.collection('users').doc(_currentUser!.uid).set({
+            'fullName': _currentUser!.displayName ?? 'User',
+            'email': _currentUser!.email ?? '',
+            'photoURL': _currentUser!.photoURL,
+            'createdAt': FieldValue.serverTimestamp(),
+          });
+          
+          // Fetch the newly created document
+          DocumentSnapshot newUserDoc = await _firestore
+              .collection('users')
+              .doc(_currentUser!.uid)
+              .get();
+              
+          setState(() {
+            _userData = newUserDoc.data() as Map<String, dynamic>;
+          });
+        }
+      }
+    } catch (e) {
+      print("Error fetching user data: $e");
+    }
+  }
+
+  // Function to decode Base64 image
+  ImageProvider? _getImageProvider(dynamic photoData) {
+    if (photoData == null || photoData.toString().isEmpty) {
+      return const AssetImage('assets/default_avatar.png');
+    }
+    
+    try {
+      final String photoString = photoData.toString();
+      
+      // Check if it's a Base64 data URL
+      if (photoString.startsWith('data:image/')) {
+        // Extract Base64 part from data URL
+        final base64String = photoString.split(',').last;
+        final bytes = base64.decode(base64String);
+        return MemoryImage(bytes);
+      }
+      // Check if it's a regular URL
+      else if (photoString.startsWith('http')) {
+        return NetworkImage(photoString);
+      }
+      // Assume it's raw Base64 without data URL prefix
+      else {
+        final bytes = base64.decode(photoString);
+        return MemoryImage(bytes);
+      }
+    } catch (e) {
+      print("Error decoding image: $e");
+      return const AssetImage('assets/default_avatar.png');
+    }
+  }
+
+  // Function to check if photo data is Base64
+  bool _isBase64Photo(dynamic photoData) {
+    if (photoData == null || photoData.toString().isEmpty) return false;
+    
+    final String photoString = photoData.toString();
+    return photoString.startsWith('data:image/') || 
+           (photoString.length > 100 && !photoString.startsWith('http'));
+  }
+
+  Future<void> _fetchProfessionals() async {
+    try {
+      // Fetch doctors from Realtime Database
+      final doctorsSnapshot = await _database.ref('doctors').once();
+      final organizationsSnapshot = await _database.ref('organizations').once();
+
+      List<Map<String, dynamic>> doctorsList = [];
+      List<Map<String, dynamic>> organizationsList = [];
+
+      if (doctorsSnapshot.snapshot.value != null) {
+        final doctorsData = doctorsSnapshot.snapshot.value as Map<dynamic, dynamic>;
+        doctorsData.forEach((key, value) {
+          doctorsList.add({
+            'id': key,
+            ...Map<String, dynamic>.from(value as Map<dynamic, dynamic>),
+            'type': 'doctor'
+          });
+        });
+      }
+
+      if (organizationsSnapshot.snapshot.value != null) {
+        final organizationsData = organizationsSnapshot.snapshot.value as Map<dynamic, dynamic>;
+        organizationsData.forEach((key, value) {
+          organizationsList.add({
+            'id': key,
+            ...Map<String, dynamic>.from(value as Map<dynamic, dynamic>),
+            'type': 'organization'
+          });
+        });
+      }
+
+      setState(() {
+        doctors = doctorsList;
+        organizations = organizationsList;
+        _isLoading = false;
+      });
+    } catch (e) {
+      print("Error fetching professionals: $e");
+      setState(() {
+        _isLoading = false;
+      });
+    }
+  }
 
   void _showProfessionalDetails(Map<String, dynamic> professional) {
+    final isDoctor = professional['type'] == 'doctor';
+    final photoProvider = _getImageProvider(professional['photo']);
+    final isBase64 = _isBase64Photo(professional['photo']);
+    
     showModalBottomSheet(
       context: context,
       backgroundColor: _currentTheme.containerColor,
@@ -115,7 +205,11 @@ class _MentalHealthProfessionalsPageState extends State<MentalHealthProfessional
                 children: [
                   CircleAvatar(
                     radius: 40,
-                    backgroundImage: AssetImage(professional["photo"]),
+                    backgroundColor: _currentTheme.primary.withOpacity(0.1),
+                    backgroundImage: photoProvider,
+                    onBackgroundImageError: (exception, stackTrace) {
+                      print("Error loading professional image: $exception");
+                    },
                   ),
                   const SizedBox(width: 16),
                   Expanded(
@@ -123,7 +217,7 @@ class _MentalHealthProfessionalsPageState extends State<MentalHealthProfessional
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          professional["name"],
+                          professional['name'] ?? 'Unknown',
                           style: const TextStyle(
                             fontSize: 20,
                             fontWeight: FontWeight.bold,
@@ -131,28 +225,51 @@ class _MentalHealthProfessionalsPageState extends State<MentalHealthProfessional
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          professional["specialization"],
+                          isDoctor 
+                              ? (professional['specialization'] ?? 'Mental Health Professional')
+                              : (professional['type'] ?? 'Organization'),
                           style: TextStyle(
                             fontSize: 16,
                             color: _currentTheme.primary,
                             fontWeight: FontWeight.w500,
                           ),
                         ),
-                        const SizedBox(height: 8),
-                        Row(
-                          children: [
-                            Icon(Icons.star, color: Colors.amber, size: 16),
-                            const SizedBox(width: 4),
-                            Text(
-                              professional["rating"],
-                              style: const TextStyle(fontWeight: FontWeight.bold),
+                        if (isBase64) ...[
+                          const SizedBox(height: 4),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: _currentTheme.primary.withOpacity(0.1),
+                              borderRadius: BorderRadius.circular(4),
                             ),
-                            const SizedBox(width: 8),
-                            Icon(Icons.work, color: _currentTheme.primary, size: 16),
-                            const SizedBox(width: 4),
-                            Text(professional["experience"]),
-                          ],
-                        ),
+                            child: Text(
+                              'Base64 Image',
+                              style: TextStyle(
+                                fontSize: 10,
+                                color: _currentTheme.primary,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ],
+                        const SizedBox(height: 8),
+                        if (isDoctor) ...[
+                          Row(
+                            children: [
+                              Icon(Icons.work, color: _currentTheme.primary, size: 16),
+                              const SizedBox(width: 4),
+                              Text(professional['experience'] ?? 'Not specified'),
+                            ],
+                          ),
+                        ] else ...[
+                          Row(
+                            children: [
+                              Icon(Icons.business, color: _currentTheme.primary, size: 16),
+                              const SizedBox(width: 4),
+                              Text(professional['type'] ?? 'Organization'),
+                            ],
+                          ),
+                        ],
                       ],
                     ),
                   ),
@@ -169,7 +286,7 @@ class _MentalHealthProfessionalsPageState extends State<MentalHealthProfessional
               ),
               const SizedBox(height: 8),
               Text(
-                professional["description"],
+                professional['description'] ?? 'No description available.',
                 style: const TextStyle(fontSize: 16, height: 1.5),
               ),
               const SizedBox(height: 20),
@@ -182,27 +299,82 @@ class _MentalHealthProfessionalsPageState extends State<MentalHealthProfessional
                 ),
               ),
               const SizedBox(height: 12),
-              Row(
-                children: [
-                  Icon(Icons.phone, color: _currentTheme.primary),
-                  const SizedBox(width: 12),
-                  Text(
-                    professional["contact"],
-                    style: const TextStyle(fontSize: 16),
+              if (professional['contact'] != null) ...[
+                Row(
+                  children: [
+                    Icon(Icons.phone, color: _currentTheme.primary),
+                    const SizedBox(width: 12),
+                    Text(
+                      professional['contact'] as String,
+                      style: const TextStyle(fontSize: 16),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+              ],
+              if (professional['email'] != null && professional['email'].toString().isNotEmpty) ...[
+                Row(
+                  children: [
+                    Icon(Icons.email, color: _currentTheme.primary),
+                    const SizedBox(width: 12),
+                    Text(
+                      professional['email'] as String,
+                      style: const TextStyle(fontSize: 16),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+              ],
+              if (professional['location'] != null) ...[
+                Row(
+                  children: [
+                    Icon(Icons.location_on, color: _currentTheme.primary),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        professional['location'] as String,
+                        style: const TextStyle(fontSize: 16),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+              ],
+              // Social Media Links
+              if ((professional['website'] != null && professional['website'].toString().isNotEmpty) ||
+                  (professional['facebook'] != null && professional['facebook'].toString().isNotEmpty) ||
+                  (professional['linkedin'] != null && professional['linkedin'].toString().isNotEmpty)) ...[
+                const SizedBox(height: 16),
+                Text(
+                  "Social Links",
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: _currentTheme.primary,
                   ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  Icon(Icons.email, color: _currentTheme.primary),
-                  const SizedBox(width: 12),
-                  const Text(
-                    "contact@mentalhealth.com",
-                    style: TextStyle(fontSize: 16),
-                  ),
-                ],
-              ),
+                ),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 10,
+                  children: [
+                    if (professional['website'] != null && professional['website'].toString().isNotEmpty)
+                      Chip(
+                        label: const Text('Website'),
+                        backgroundColor: _currentTheme.primary.withOpacity(0.1),
+                      ),
+                    if (professional['facebook'] != null && professional['facebook'].toString().isNotEmpty)
+                      Chip(
+                        label: const Text('Facebook'),
+                        backgroundColor: _currentTheme.primary.withOpacity(0.1),
+                      ),
+                    if (professional['linkedin'] != null && professional['linkedin'].toString().isNotEmpty)
+                      Chip(
+                        label: const Text('LinkedIn'),
+                        backgroundColor: _currentTheme.primary.withOpacity(0.1),
+                      ),
+                  ],
+                ),
+              ],
               const SizedBox(height: 30),
               SizedBox(
                 width: double.infinity,
@@ -219,9 +391,9 @@ class _MentalHealthProfessionalsPageState extends State<MentalHealthProfessional
                       borderRadius: BorderRadius.circular(12),
                     ),
                   ),
-                  child: const Text(
-                    "Contact Professional",
-                    style: TextStyle(
+                  child: Text(
+                    isDoctor ? "Contact Professional" : "Contact Organization",
+                    style: const TextStyle(
                       fontSize: 16,
                       fontWeight: FontWeight.bold,
                     ),
@@ -237,6 +409,8 @@ class _MentalHealthProfessionalsPageState extends State<MentalHealthProfessional
   }
 
   void _showContactDialog(Map<String, dynamic> professional) {
+    final isDoctor = professional['type'] == 'doctor';
+    
     showDialog(
       context: context,
       builder: (BuildContext context) {
@@ -246,7 +420,7 @@ class _MentalHealthProfessionalsPageState extends State<MentalHealthProfessional
             borderRadius: BorderRadius.circular(16),
           ),
           title: Text(
-            "Contact ${professional["name"]}",
+            "Contact ${professional['name']}",
             style: TextStyle(
               color: _currentTheme.primary,
               fontWeight: FontWeight.bold,
@@ -256,15 +430,27 @@ class _MentalHealthProfessionalsPageState extends State<MentalHealthProfessional
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                "Phone: ${professional["contact"]}",
-                style: const TextStyle(fontSize: 16),
-              ),
-              const SizedBox(height: 8),
-              const Text(
-                "Email: contact@mentalhealth.com",
-                style: TextStyle(fontSize: 16),
-              ),
+              if (professional['contact'] != null) ...[
+                Text(
+                  "Phone: ${professional['contact']}",
+                  style: const TextStyle(fontSize: 16),
+                ),
+                const SizedBox(height: 8),
+              ],
+              if (professional['email'] != null && professional['email'].toString().isNotEmpty) ...[
+                Text(
+                  "Email: ${professional['email']}",
+                  style: const TextStyle(fontSize: 16),
+                ),
+                const SizedBox(height: 8),
+              ],
+              if (professional['location'] != null) ...[
+                Text(
+                  "Location: ${professional['location']}",
+                  style: const TextStyle(fontSize: 16),
+                ),
+                const SizedBox(height: 8),
+              ],
               const SizedBox(height: 16),
               const Text(
                 "Please be respectful and professional when contacting mental health professionals.",
@@ -292,6 +478,176 @@ class _MentalHealthProfessionalsPageState extends State<MentalHealthProfessional
     );
   }
 
+  Widget _buildProfessionalCard(Map<String, dynamic> professional) {
+    final isDoctor = professional['type'] == 'doctor';
+    final photoProvider = _getImageProvider(professional['photo']);
+    final isBase64 = _isBase64Photo(professional['photo']);
+    
+    return Card(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      color: _currentTheme.containerColor,
+      elevation: 4,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: InkWell(
+        onTap: () => _showProfessionalDetails(professional),
+        borderRadius: BorderRadius.circular(16),
+        child: Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Stack(
+                children: [
+                  CircleAvatar(
+                    radius: 35,
+                    backgroundColor: _currentTheme.primary.withOpacity(0.1),
+                    backgroundImage: photoProvider,
+                    onBackgroundImageError: (exception, stackTrace) {
+                      print("Error loading professional image: $exception");
+                    },
+                  ),
+                  if (isBase64)
+                    Positioned(
+                      bottom: 0,
+                      right: 0,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: _currentTheme.primary,
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Text(
+                          'B64',
+                          style: TextStyle(
+                            fontSize: 8,
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      professional['name'] ?? 'Unknown',
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      isDoctor 
+                          ? (professional['specialization'] ?? 'Mental Health Professional')
+                          : (professional['type'] ?? 'Organization'),
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: _currentTheme.primary,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      professional['description'] ?? 'No description available.',
+                      style: const TextStyle(fontSize: 14, height: 1.4),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 8),
+                    if (isDoctor && professional['experience'] != null) ...[
+                      Row(
+                        children: [
+                          Icon(Icons.work, color: _currentTheme.primary, size: 16),
+                          const SizedBox(width: 4),
+                          Text(professional['experience']),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                    ],
+                    if (professional['location'] != null) ...[
+                      Row(
+                        children: [
+                          Icon(Icons.location_on, size: 16, color: _currentTheme.primary),
+                          const SizedBox(width: 4),
+                          Expanded(
+                            child: Text(
+                              professional['location'] as String,
+                              style: const TextStyle(fontSize: 14),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                    ],
+                    if (professional['contact'] != null) ...[
+                      Row(
+                        children: [
+                          Icon(Icons.phone, size: 16, color: _currentTheme.primary),
+                          const SizedBox(width: 4),
+                          Text(
+                            professional['contact'] as String,
+                            style: const TextStyle(fontSize: 14),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // Function to show image in full screen
+  void _showFullScreenImage(dynamic photoData) {
+    final photoProvider = _getImageProvider(photoData);
+    
+    showDialog(
+      context: context,
+      builder: (context) {
+        return Dialog(
+          backgroundColor: Colors.transparent,
+          insetPadding: const EdgeInsets.all(20),
+          child: Stack(
+            children: [
+              Container(
+                width: double.infinity,
+                height: 400,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(16),
+                  image: DecorationImage(
+                    image: photoProvider ?? const AssetImage('assets/images/user_photo.png'),
+                    fit: BoxFit.contain,
+                  ),
+                ),
+              ),
+              Positioned(
+                top: 10,
+                right: 10,
+                child: IconButton(
+                  icon: const Icon(Icons.close, color: Colors.white, size: 30),
+                  onPressed: () => Navigator.of(context).pop(),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -306,7 +662,7 @@ class _MentalHealthProfessionalsPageState extends State<MentalHealthProfessional
         child: SafeArea(
           child: Column(
             children: [
-              // 🔹 Top Bar with theme colors
+              // Top Bar
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                 decoration: BoxDecoration(
@@ -327,9 +683,12 @@ class _MentalHealthProfessionalsPageState extends State<MentalHealthProfessional
                       style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.black),
                     ),
                     IconButton(
-                      icon: const Icon(Icons.search, size: 28, color: Colors.black),
+                      icon: const Icon(Icons.refresh, size: 28, color: Colors.black),
                       onPressed: () {
-                        // Implement search functionality
+                        setState(() {
+                          _isLoading = true;
+                        });
+                        _fetchProfessionals();
                       },
                     ),
                   ],
@@ -338,7 +697,53 @@ class _MentalHealthProfessionalsPageState extends State<MentalHealthProfessional
 
               const SizedBox(height: 10),
 
-              // 🔹 Header Section
+              // Toggle Buttons for Doctors/Organizations
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: _showDoctors ? _currentTheme.primary : Colors.white,
+                          foregroundColor: _showDoctors ? Colors.white : Colors.black,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                        ),
+                        onPressed: () {
+                          setState(() {
+                            _showDoctors = true;
+                          });
+                        },
+                        child: const Text('Doctors'),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: !_showDoctors ? _currentTheme.primary : Colors.white,
+                          foregroundColor: !_showDoctors ? Colors.white : Colors.black,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                        ),
+                        onPressed: () {
+                          setState(() {
+                            _showDoctors = false;
+                          });
+                        },
+                        child: const Text('Organizations'),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+              const SizedBox(height: 10),
+
+              // Header Section
               Padding(
                 padding: const EdgeInsets.all(16.0),
                 child: Container(
@@ -371,7 +776,7 @@ class _MentalHealthProfessionalsPageState extends State<MentalHealthProfessional
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              "Professional Support",
+                              _showDoctors ? "Professional Doctors" : "Health Organizations",
                               style: TextStyle(
                                 fontSize: 18,
                                 fontWeight: FontWeight.bold,
@@ -380,7 +785,9 @@ class _MentalHealthProfessionalsPageState extends State<MentalHealthProfessional
                             ),
                             const SizedBox(height: 4),
                             Text(
-                              "Connect with qualified mental health professionals for personalized support",
+                              _showDoctors 
+                                  ? "Connect with qualified mental health doctors for personalized support"
+                                  : "Find mental health organizations and support centers near you",
                               style: TextStyle(
                                 fontSize: 14,
                                 color: Colors.black54,
@@ -394,94 +801,44 @@ class _MentalHealthProfessionalsPageState extends State<MentalHealthProfessional
                 ),
               ),
 
-              // 🔹 Scrollable Professionals List
+              // Professionals List
               Expanded(
-                child: ListView.builder(
-                  padding: const EdgeInsets.symmetric(vertical: 8),
-                  itemCount: professionals.length,
-                  itemBuilder: (context, index) {
-                    final prof = professionals[index];
-                    return Card(
-                      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                      color: _currentTheme.containerColor,
-                      elevation: 4,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                      child: Padding(
-                        padding: const EdgeInsets.all(16.0),
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            CircleAvatar(
-                              radius: 35,
-                              backgroundColor: _currentTheme.primary.withOpacity(0.1),
-                              backgroundImage: AssetImage(prof["photo"]),
+                child: _isLoading
+                    ? const Center(child: CircularProgressIndicator())
+                    : (_showDoctors ? doctors : organizations).isEmpty
+                        ? Center(
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(
+                                  Icons.people_outline,
+                                  size: 64,
+                                  color: _currentTheme.primary,
+                                ),
+                                const SizedBox(height: 16),
+                                Text(
+                                  _showDoctors 
+                                      ? "No doctors available"
+                                      : "No organizations available",
+                                  style: TextStyle(
+                                    fontSize: 18,
+                                    color: _currentTheme.primary,
+                                  ),
+                                ),
+                              ],
                             ),
-                            const SizedBox(width: 16),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    prof["name"],
-                                    style: const TextStyle(
-                                      fontSize: 18,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    prof["specialization"],
-                                    style: TextStyle(
-                                      fontSize: 14,
-                                      color: _currentTheme.primary,
-                                      fontWeight: FontWeight.w500,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 8),
-                                  Text(
-                                    prof["description"],
-                                    style: const TextStyle(fontSize: 14, height: 1.4),
-                                  ),
-                                  const SizedBox(height: 8),
-                                  Row(
-                                    children: [
-                                      Icon(Icons.star, color: Colors.amber, size: 16),
-                                      const SizedBox(width: 4),
-                                      Text(
-                                        prof["rating"],
-                                        style: const TextStyle(fontWeight: FontWeight.bold),
-                                      ),
-                                      const SizedBox(width: 12),
-                                      Icon(Icons.work, color: _currentTheme.primary, size: 16),
-                                      const SizedBox(width: 4),
-                                      Text(prof["experience"]),
-                                    ],
-                                  ),
-                                  const SizedBox(height: 8),
-                                  Row(
-                                    children: [
-                                      Icon(Icons.phone, size: 16, color: _currentTheme.primary),
-                                      const SizedBox(width: 4),
-                                      Text(
-                                        prof["contact"],
-                                        style: const TextStyle(fontSize: 14),
-                                      ),
-                                    ],
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    );
-                  },
-                ),
+                          )
+                        : ListView.builder(
+                            padding: const EdgeInsets.symmetric(vertical: 8),
+                            itemCount: _showDoctors ? doctors.length : organizations.length,
+                            itemBuilder: (context, index) {
+                              final professional = _showDoctors ? doctors[index] : organizations[index];
+                              return _buildProfessionalCard(professional);
+                            },
+                          ),
               ),
 
-              // 🔹 Bottom Bar with theme colors
+              // Bottom Bar
               Container(
                 padding: const EdgeInsets.symmetric(vertical: 10),
                 decoration: BoxDecoration(
@@ -492,14 +849,24 @@ class _MentalHealthProfessionalsPageState extends State<MentalHealthProfessional
                   mainAxisAlignment: MainAxisAlignment.spaceAround,
                   children: [
                     IconButton(
-                      icon: const Icon(Icons.home, size: 28, color: Colors.black),
+                      icon: const Icon(Icons.home, size: 30, color: Colors.black),
                       onPressed: () {
-                        Navigator.pushNamed(context, "/home");
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => HomeScreen(userData: _userData),
+                          ),
+                        );
                       },
                     ),
                     GestureDetector(
                       onTap: () {
-                        Navigator.pushNamed(context, '/chat');
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => ChatScreen(userData: _userData),
+                          ),
+                        );
                       },
                       child: Image.asset(
                         'assets/icons/4616759.png',
@@ -509,15 +876,21 @@ class _MentalHealthProfessionalsPageState extends State<MentalHealthProfessional
                       ),
                     ),
                     IconButton(
-                      icon: const Icon(Icons.fitness_center, size: 28, color: Colors.black),
-                      onPressed: () {
-                        Navigator.pushNamed(context, "/exercise");
-                      },
+                      icon: const Icon(Icons.account_circle_outlined, size: 30, color: Colors.black),
+                      onPressed: () => Navigator.pushNamed(context, '/profile'),
                     ),
                     IconButton(
-                      icon: const Icon(Icons.account_circle_outlined, size: 28, color: Colors.black),
+                      icon: const Icon(Icons.fitness_center, size: 30, color: Colors.black),
                       onPressed: () {
-                        Navigator.pushNamed(context, "/profile");
+                        Navigator.pushReplacement(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => RecommendationsScreen(
+                              pUserData: _userData,
+                              userId: _currentUser?.uid ?? 'AYPqR0TqB4cjbZeofNIPYAOTtWO2',
+                            ),
+                          ),
+                        );
                       },
                     ),
                   ],

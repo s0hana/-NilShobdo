@@ -462,12 +462,14 @@ class _ChatScreenState extends State<ChatScreen> {
         elevation: 2,
         shadowColor: _currentTheme.primary.withOpacity(0.5),
         actions: [
+          // Settings icon
           IconButton(
             icon: const Icon(Icons.settings, color: Colors.black),
             onPressed: () {
               Navigator.pushNamed(context, '/set');
             },
           ),
+          // Menu with icons
           PopupMenuButton<String>(
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(12),
@@ -475,6 +477,53 @@ class _ChatScreenState extends State<ChatScreen> {
             color: _currentTheme.containerColor,
             elevation: 6,
             itemBuilder: (context) => [
+              // Home icon in menu
+              PopupMenuItem(
+                value: 'home',
+                child: Row(
+                  children: [
+                    Icon(Icons.home, color: _currentTheme.primary),
+                    const SizedBox(width: 8),
+                    const Text('Home'),
+                  ],
+                ),
+              ),
+              // Exercise icon in menu
+              PopupMenuItem(
+                value: 'exercise',
+                child: Row(
+                  children: [
+                    Icon(Icons.fitness_center, color: _currentTheme.primary),
+                    const SizedBox(width: 8),
+                    const Text('Exercises'),
+                  ],
+                ),
+              ),
+              // Profile icon in menu
+              PopupMenuItem(
+                value: 'profile',
+                child: Row(
+                  children: [
+                    Icon(Icons.account_circle, color: _currentTheme.primary),
+                    const SizedBox(width: 8),
+                    const Text('Profile'),
+                  ],
+                ),
+              ),
+              // Professionals icon in menu
+              PopupMenuItem(
+                value: 'professionals',
+                child: Row(
+                  children: [
+                    Icon(Icons.people, color: _currentTheme.primary),
+                    const SizedBox(width: 8),
+                    const Text('Professionals'),
+                  ],
+                ),
+              ),
+              // Divider
+              const PopupMenuDivider(),
+              // New Chat icon in menu
               PopupMenuItem(
                 value: 'new_chat',
                 child: Row(
@@ -485,6 +534,7 @@ class _ChatScreenState extends State<ChatScreen> {
                   ],
                 ),
               ),
+              // Chat History icon in menu
               PopupMenuItem(
                 value: 'history',
                 child: Row(
@@ -497,7 +547,20 @@ class _ChatScreenState extends State<ChatScreen> {
               ),
             ],
             onSelected: (value) {
-              if (value == 'new_chat') {
+              if (value == 'home') {
+                Navigator.pushReplacement(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => HomeScreen(userData: widget.userData),
+                  ),
+                );
+              } else if (value == 'exercise') {
+                Navigator.pushNamed(context, '/exercise');
+              } else if (value == 'profile') {
+                Navigator.pushNamed(context, '/profile');
+              } else if (value == 'professionals') {
+                Navigator.pushNamed(context, '/pro');
+              } else if (value == 'new_chat') {
                 _startNewChat();
               } else if (value == 'history') {
                 _viewChatHistory();
@@ -611,51 +674,6 @@ class _ChatScreenState extends State<ChatScreen> {
                       icon: const Icon(Icons.send, color: Colors.black),
                       onPressed: () => sendMessage(_controller.text),
                     ),
-                  ),
-                ],
-              ),
-            ),
-
-            // 🔹 Bottom Navigation Bar with theme colors
-            Container(
-              padding: const EdgeInsets.symmetric(vertical: 10),
-              decoration: BoxDecoration(
-                border: Border(
-                  top: BorderSide(color: _currentTheme.primary, width: 2),
-                ),
-                color: _currentTheme.primary,
-              ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceAround,
-                children: [
-                  IconButton(
-                    icon: const Icon(Icons.home, size: 30, color: Colors.black),
-                    onPressed: () {
-                      Navigator.pushReplacement(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => HomeScreen(userData: widget.userData),
-                        ),
-                      );
-                    },
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.fitness_center, size: 30, color: Colors.black),
-                    onPressed: () {
-                      Navigator.pushNamed(context, '/exercise');
-                    },
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.account_circle_outlined, size: 30, color: Colors.black),
-                    onPressed: () {
-                      Navigator.pushNamed(context, '/profile');
-                    },
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.people, size: 30, color: Colors.black),
-                    onPressed: () {
-                      Navigator.pushNamed(context, '/pro');
-                    },
                   ),
                 ],
               ),

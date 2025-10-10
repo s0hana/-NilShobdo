@@ -8,13 +8,13 @@ import 'package:audioplayers/audioplayers.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'home_screen.dart';
 import 'chat_sceen.dart';
-import 'theme_manager.dart'; // Theme manager import করুন
+import 'theme_manager.dart';
 
 class RecommendationsScreen extends StatefulWidget {
-  final Map<String, dynamic> p_userData;
+  final Map<String, dynamic> pUserData;
   final String userId;
 
-  const RecommendationsScreen({super.key, required this.p_userData, required this.userId});
+  const RecommendationsScreen({super.key, required this.pUserData, required this.userId});
 
   @override
   State<RecommendationsScreen> createState() => _RecommendationsScreenState();
@@ -59,7 +59,6 @@ class _RecommendationsScreenState extends State<RecommendationsScreen> {
     super.initState();
     _loadTheme();
     _initializeFirebase();
-    _fetchUserProfileData();
   }
 
   @override
@@ -69,17 +68,21 @@ class _RecommendationsScreenState extends State<RecommendationsScreen> {
   }
 
   Future<void> _loadTheme() async {
-    final themeIndex = await ThemeManager.getSelectedThemeIndex();
-    setState(() {
-      _currentThemeIndex = themeIndex;
-      _currentTheme = ThemeManager.getCurrentTheme(themeIndex);
-    });
+    try {
+      final themeIndex = await ThemeManager.getSelectedThemeIndex();
+      setState(() {
+        _currentThemeIndex = themeIndex;
+        _currentTheme = ThemeManager.getCurrentTheme(themeIndex);
+      });
+    } catch (e) {
+      print("Error loading theme: $e");
+    }
   }
 
   Future<void> _initializeFirebase() async {
     try {
       await Firebase.initializeApp();
-      _fetchUserData();
+      await _fetchUserData();
     } catch (e) {
       setState(() {
         errorMessage = 'Failed to initialize Firebase: $e';
@@ -90,66 +93,50 @@ class _RecommendationsScreenState extends State<RecommendationsScreen> {
 
   Future<void> _fetchUserData() async {
     try {
+      // Try Firestore first
       final DocumentSnapshot firestoreSnapshot = 
           await firestore.collection('userAnalysis').doc(widget.userId).get();
       
-      if (firestoreSnapshot.exists) {
-        setState(() {
-          userData = firestoreSnapshot.data() as Map<String, dynamic>;
-        });
-        await _getSpotifyAccessToken();
-        _fetchRecommendations();
-        return;
+      if (firestoreSnapshot.exists && firestoreSnapshot.data() != null) {
+        final data = firestoreSnapshot.data();
+        if (data is Map<String, dynamic>) {
+          setState(() {
+            userData = data;
+          });
+          await _getSpotifyAccessToken();
+          await _fetchRecommendations();
+          return;
+        }
       }
       
+      // Try Realtime Database
       final DataSnapshot realtimeSnapshot = 
           await realtimeDbRef.child('userAnalysis').child(widget.userId).get();
       
-      if (realtimeSnapshot.exists) {
-        setState(() {
-          userData = Map<String, dynamic>.from(realtimeSnapshot.value as Map);
-        });
-        await _getSpotifyAccessToken();
-        _fetchRecommendations();
-        return;
+      if (realtimeSnapshot.exists && realtimeSnapshot.value != null) {
+        final data = realtimeSnapshot.value;
+        if (data is Map) {
+          setState(() {
+            userData = Map<String, dynamic>.from(data as Map);
+          });
+          await _getSpotifyAccessToken();
+          await _fetchRecommendations();
+          return;
+        }
       }
       
+      // If no data found
       setState(() {
         errorMessage = 'No user data found for analysis';
         isLoading = false;
       });
-
-      final profileData = await _fetchUserProfileData();
-      setState(() {
-        userProfileData = profileData;
-      });
+      
     } catch (e) {
+      print("Error fetching user data: $e");
       setState(() {
         errorMessage = 'Failed to load user data: $e';
         isLoading = false;
       });
-    }
-  }
-
-  Future<Map<String, dynamic>> _fetchUserProfileData() async {
-    try {
-      final DocumentSnapshot userDoc = 
-          await firestore.collection('users').doc(widget.userId).get();
-      
-      if (userDoc.exists) {
-        return userDoc.data() as Map<String, dynamic>;
-      }
-      
-      final DataSnapshot realtimeSnapshot = 
-          await realtimeDbRef.child('users').child(widget.userId).get();
-      
-      if (realtimeSnapshot.exists) {
-        return Map<String, dynamic>.from(realtimeSnapshot.value as Map);
-      }
-      
-      return {};
-    } catch (e) {
-      return {};
     }
   }
 
@@ -168,9 +155,13 @@ class _RecommendationsScreenState extends State<RecommendationsScreen> {
 
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
-        setState(() {
-          spotifyAccessToken = data['access_token'];
-        });
+        if (data is Map<String, dynamic> && data.containsKey('access_token')) {
+          setState(() {
+            spotifyAccessToken = data['access_token'] as String;
+          });
+        }
+      } else {
+        print('Spotify token request failed with status: ${response.statusCode}');
       }
     } catch (e) {
       print('Error getting Spotify token: $e');
@@ -179,9 +170,14 @@ class _RecommendationsScreenState extends State<RecommendationsScreen> {
 
   Future<void> _fetchRecommendations() async {
     try {
-      final bookRecs = await _getBookRecommendations();
-      final exerciseRecs = await _getExerciseRecommendations();
-      final songRecs = await _getSongRecommendations();
+      final List<dynamic> bookRecs = await _getBookRecommendations();
+      final List<dynamic> exerciseRecs = await _getExerciseRecommendations();
+      final List<dynamic> songRecs = await _getSongRecommendations();
+      
+      // Validate data types
+      if (bookRecs is! List) throw Exception('Book recommendations is not a list');
+      if (exerciseRecs is! List) throw Exception('Exercise recommendations is not a list');
+      if (songRecs is! List) throw Exception('Song recommendations is not a list');
       
       setState(() {
         bookRecommendations = bookRecs;
@@ -190,58 +186,170 @@ class _RecommendationsScreenState extends State<RecommendationsScreen> {
         isLoading = false;
       });
     } catch (e) {
+      print("Error fetching recommendations: $e");
       setState(() {
-        errorMessage = 'Failed to load recommendations: $e';
+        errorMessage = 'Failed to load recommendations: ${e.toString()}';
         isLoading = false;
       });
     }
   }
 
   Future<List<dynamic>> _getBookRecommendations() async {
-    final themes = _extractThemesFromUserData();
-    List<dynamic> allBooks = [];
-    
-    for (String theme in themes) {
-      final response = await http.get(
-        Uri.parse('https://www.googleapis.com/books/v1/volumes?q=$theme&maxResults=3&key=$googleBooksApiKey')
+    try {
+      final themes = _extractThemesFromUserData();
+      List<dynamic> allBooks = [];
+      
+      for (String theme in themes.take(3)) { // Limit to 3 themes to avoid too many requests
+        final response = await http.get(
+          Uri.parse('https://www.googleapis.com/books/v1/volumes?q=$theme&maxResults=3&key=$googleBooksApiKey')
+        );
+        
+        if (response.statusCode == 200) {
+          final data = json.decode(response.body);
+          if (data is Map<String, dynamic> && data.containsKey('items')) {
+            final items = data['items'];
+            if (items is List) {
+              allBooks.addAll(items);
+            }
+          }
+        }
+        
+        // Add delay to avoid rate limiting
+        await Future.delayed(const Duration(milliseconds: 200));
+      }
+      
+      // Remove duplicates
+      final seenIds = <String>{};
+      final uniqueBooks = allBooks.where((book) {
+        if (book is Map<String, dynamic> && book.containsKey('id')) {
+          final id = book['id'] as String;
+          return seenIds.add(id);
+        }
+        return false;
+      }).toList();
+      
+      return uniqueBooks.take(10).toList();
+    } catch (e) {
+      print("Error getting book recommendations: $e");
+      return _getFallbackBooks();
+    }
+  }
+
+  List<dynamic> _getFallbackBooks() {
+    return [
+      {
+        'volumeInfo': {
+          'title': 'The Power of Now',
+          'authors': ['Eckhart Tolle'],
+          'imageLinks': {'thumbnail': 'https://placehold.co/150x200/4CAF50/white?text=Power+of+Now'},
+          'previewLink': 'https://books.google.com/books?id=some_id'
+        }
+      },
+      {
+        'volumeInfo': {
+          'title': 'Atomic Habits',
+          'authors': ['James Clear'],
+          'imageLinks': {'thumbnail': 'https://placehold.co/150x200/2196F3/white?text=Atomic+Habits'},
+          'previewLink': 'https://books.google.com/books?id=some_id'
+        }
+      }
+    ];
+  }
+
+  Future<List<dynamic>> _getExerciseRecommendations() async {
+    try {
+      final prompt = _createExercisePrompt();
+      
+      final response = await http.post(
+        Uri.parse('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=$geminiApiKey'),
+        headers: {'Content-Type': 'application/json'},
+        body: json.encode({
+          'contents': [{
+            'parts': [{
+              'text': prompt
+            }]
+          }]
+        })
       );
       
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
-        if (data['items'] != null) {
-          allBooks.addAll(data['items']);
+        if (data is Map<String, dynamic> && 
+            data.containsKey('candidates') && 
+            data['candidates'] is List && 
+            data['candidates'].isNotEmpty) {
+          
+          final candidate = data['candidates'][0];
+          if (candidate is Map<String, dynamic> &&
+              candidate.containsKey('content') &&
+              candidate['content'] is Map<String, dynamic> &&
+              candidate['content']['parts'] is List &&
+              candidate['content']['parts'].isNotEmpty) {
+            
+            final text = candidate['content']['parts'][0]['text'] as String;
+            return _parseExerciseResponse(text);
+          }
         }
       }
+      
+      return _getFallbackExercises();
+    } catch (e) {
+      print("Error getting exercise recommendations: $e");
+      return _getFallbackExercises();
     }
-    
-    final seenIds = <String>{};
-    allBooks.retainWhere((book) => seenIds.add(book['id']));
-    
-    return allBooks.take(10).toList(); 
   }
 
-  Future<List<dynamic>> _getExerciseRecommendations() async {
-    final prompt = _createExercisePrompt();
-    
-    final response = await http.post(
-      Uri.parse('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=$geminiApiKey'),
-      headers: {'Content-Type': 'application/json'},
-      body: json.encode({
-        'contents': [{
-          'parts': [{
-            'text': prompt
-          }]
-        }]
-      })
-    );
-    
-    if (response.statusCode == 200) {
-      final data = json.decode(response.body);
-      final text = data['candidates'][0]['content']['parts'][0]['text'];
-      return _parseExerciseResponse(text);
-    } else {
-      throw Exception('Failed to get exercise recommendations');
+  List<dynamic> _parseExerciseResponse(String text) {
+    try {
+      print("Raw exercise response: $text");
+      
+      final jsonPattern = RegExp(r'\[.*\]', multiLine: true, dotAll: true);
+      final match = jsonPattern.firstMatch(text);
+      
+      if (match != null) {
+        final jsonString = match.group(0);
+        if (jsonString != null) {
+          final parsedData = json.decode(jsonString);
+          if (parsedData is List) {
+            // Validate each item in the list
+            for (var item in parsedData) {
+              if (item is! Map<String, dynamic>) {
+                return _getFallbackExercises();
+              }
+            }
+            return parsedData;
+          }
+        }
+      }
+      
+      return _getFallbackExercises();
+    } catch (e) {
+      print("Error parsing exercise response: $e");
+      return _getFallbackExercises();
     }
+  }
+
+  List<dynamic> _getFallbackExercises() {
+    return [
+      {
+        'title': 'Deep Breathing',
+        'description': 'Practice deep breathing for 5 minutes to calm your mind',
+        'duration': '5 minutes',
+        'category': 'Relaxation'
+      },
+      {
+        'title': 'Gratitude Journaling',
+        'description': 'Write down three things you are grateful for today',
+        'duration': '10 minutes',
+        'category': 'Mindfulness'
+      },
+      {
+        'title': 'Mindful Walking',
+        'description': 'Take a 10-minute walk while paying attention to your surroundings',
+        'duration': '10 minutes',
+        'category': 'Mindfulness'
+      }
+    ];
   }
 
   Future<List<dynamic>> _getSongRecommendations() async {
@@ -254,54 +362,104 @@ class _RecommendationsScreenState extends State<RecommendationsScreen> {
       
       final List<dynamic> spotifySongs = [];
       
-      for (final song in geminiSongRecs) {
-        final songName = song['title'] ?? '';
-        final artistName = song['artist'] ?? '';
-        
-        if (songName.isNotEmpty) {
-          try {
-            final spotifySong = await _searchSpotifySong(songName, artistName);
-            if (spotifySong != null) {
-              spotifySongs.add(spotifySong);
+      for (final song in geminiSongRecs.take(8)) { // Limit to 8 songs
+        if (song is Map<String, dynamic>) {
+          final songName = (song['title'] ?? '') as String;
+          final artistName = (song['artist'] ?? '') as String;
+          
+          if (songName.isNotEmpty) {
+            try {
+              final spotifySong = await _searchSpotifySong(songName, artistName);
+              if (spotifySong != null) {
+                spotifySongs.add(spotifySong);
+              }
+            } catch (e) {
+              print('Error searching for song $songName on Spotify: $e');
             }
-          } catch (e) {
-            print('Error searching for song $songName on Spotify: $e');
           }
         }
         
         if (spotifySongs.length >= 6) break;
       }
       
-      if (spotifySongs.isNotEmpty) {
-        return spotifySongs;
-      }
-      
-      return geminiSongRecs;
+      return spotifySongs.isNotEmpty ? spotifySongs : geminiSongRecs;
     } catch (e) {
+      print("Error getting song recommendations: $e");
       return _getFallbackSongs();
     }
   }
 
   Future<List<dynamic>> _getGeminiSongRecommendations() async {
-    final prompt = _createMusicPrompt();
-    
-    final response = await http.post(
-      Uri.parse('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=$geminiApiKey'),
-      headers: {'Content-Type': 'application/json'},
-      body: json.encode({
-        'contents': [{
-          'parts': [{
-            'text': prompt
+    try {
+      final prompt = _createMusicPrompt();
+      
+      final response = await http.post(
+        Uri.parse('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=$geminiApiKey'),
+        headers: {'Content-Type': 'application/json'},
+        body: json.encode({
+          'contents': [{
+            'parts': [{
+              'text': prompt
+            }]
           }]
-        }]
-      })
-    );
-    
-    if (response.statusCode == 200) {
-      final data = json.decode(response.body);
-      final text = data['candidates'][0]['content']['parts'][0]['text'];
-      return _parseMusicResponse(text);
-    } else {
+        })
+      );
+      
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        if (data is Map<String, dynamic> && 
+            data.containsKey('candidates') && 
+            data['candidates'] is List && 
+            data['candidates'].isNotEmpty) {
+          
+          final candidate = data['candidates'][0];
+          if (candidate is Map<String, dynamic> &&
+              candidate.containsKey('content') &&
+              candidate['content'] is Map<String, dynamic> &&
+              candidate['content']['parts'] is List &&
+              candidate['content']['parts'].isNotEmpty) {
+            
+            final text = candidate['content']['parts'][0]['text'] as String;
+            return _parseMusicResponse(text);
+          }
+        }
+      }
+      
+      return _getFallbackSongs();
+    } catch (e) {
+      print("Error getting Gemini song recommendations: $e");
+      return _getFallbackSongs();
+    }
+  }
+
+  List<dynamic> _parseMusicResponse(String text) {
+    try {
+      print("Raw music response: $text");
+      
+      final jsonPattern = RegExp(r'\[.*\]', multiLine: true, dotAll: true);
+      final match = jsonPattern.firstMatch(text);
+      
+      if (match != null) {
+        final jsonString = match.group(0);
+        if (jsonString != null) {
+          final parsedData = json.decode(jsonString);
+          if (parsedData is List) {
+            // Validate each item has required fields
+            for (var item in parsedData) {
+              if (item is! Map<String, dynamic> || 
+                  !item.containsKey('title') || 
+                  !item.containsKey('artist')) {
+                return _getFallbackSongs();
+              }
+            }
+            return parsedData;
+          }
+        }
+      }
+      
+      return _getFallbackSongs();
+    } catch (e) {
+      print("Error parsing music response: $e");
       return _getFallbackSongs();
     }
   }
@@ -331,10 +489,15 @@ class _RecommendationsScreenState extends State<RecommendationsScreen> {
       
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
-        final tracks = data['tracks']['items'];
-        
-        if (tracks != null && tracks.isNotEmpty) {
-          return tracks[0];
+        if (data is Map<String, dynamic> && 
+            data.containsKey('tracks') && 
+            data['tracks'] is Map<String, dynamic> &&
+            data['tracks']['items'] is List) {
+          
+          final tracks = data['tracks']['items'] as List;
+          if (tracks.isNotEmpty) {
+            return tracks[0];
+          }
         }
       }
     } catch (e) {
@@ -347,276 +510,250 @@ class _RecommendationsScreenState extends State<RecommendationsScreen> {
   List<dynamic> _getFallbackSongs() {
     return [
       {
-        'title': 'Calm Meditation',
-        'artist': 'Meditation Masters',
-        'description': 'Relaxing meditation music for stress relief',
-        'image': 'https://placehold.co/150x150/2196F3/white?text=Meditation',
+        'name': 'Weightless',
+        'artists': [{'name': 'Marconi Union'}],
+        'album': {'images': [{'url': 'https://placehold.co/150x150/4CAF50/white?text=Weightless'}]},
         'preview_url': 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3',
+        'external_urls': {'spotify': 'https://open.spotify.com/track/example1'}
       },
       {
-        'title': 'Peaceful Mind',
-        'artist': 'Relaxation Sounds',
-        'description': 'Soothing sounds for mental peace',
-        'image': 'https://placehold.co/150x150/2196F3/white?text=Relaxation',
+        'name': 'Clair de Lune',
+        'artists': [{'name': 'Claude Debussy'}],
+        'album': {'images': [{'url': 'https://placehold.co/150x150/2196F3/white?text=Clair+de+Lune'}]},
         'preview_url': 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3',
-      },
+        'external_urls': {'spotify': 'https://open.spotify.com/track/example2'}
+      }
     ];
   }
 
   List<String> _extractThemesFromUserData() {
     final themes = <String>[];
     
-    if (userData['mental_condition'] != null) {
+    try {
+      // Safe access to mental_condition
       final mentalCondition = userData['mental_condition'];
+      if (mentalCondition is Map<String, dynamic>) {
+        if (mentalCondition['anger'] != null) themes.add('anger management');
+        if (mentalCondition['anxiety_triggers'] != null) themes.add('anxiety relief');
+        
+        final selfWorth = mentalCondition['self_worth'];
+        if (selfWorth is String && selfWorth.contains('Low')) {
+          themes.add('self esteem');
+        }
+        
+        final suicidalIdeation = mentalCondition['suicidal_ideation'];
+        if (suicidalIdeation != null) {
+          themes.add('mental health recovery');
+          themes.add('suicide prevention');
+        }
+        
+        final moodPatterns = mentalCondition['mood_patterns'];
+        if (moodPatterns is String && moodPatterns.contains('mood swings')) {
+          themes.add('mood stability');
+        }
+        
+        final stressIndicators = mentalCondition['stress_indicators'];
+        if (stressIndicators is String && stressIndicators.contains('High')) {
+          themes.add('stress management');
+        }
+      }
       
-      if (mentalCondition['anger'] != null) themes.add('anger management');
-      if (mentalCondition['anxiety_triggers'] != null) themes.add('anxiety relief');
-      if (mentalCondition['self_worth']?.toString().contains('Low') ?? false) {
-        themes.add('self esteem');
-      }
-      if (mentalCondition['suicidal_ideation'] != null) {
-        themes.add('mental health recovery');
-        themes.add('suicide prevention');
-      }
-      if (mentalCondition['mood_patterns']?.toString().contains('mood swings') ?? false) {
-        themes.add('mood stability');
-      }
-      if (mentalCondition['stress_indicators']?.toString().contains('High') ?? false) {
-        themes.add('stress management');
-      }
-    }
-    
-    if (userData['interests'] != null) {
+      // Safe access to interests
       final interests = userData['interests'];
-      if (interests['topics'] != null) {
-        if (interests['topics'].toString().contains('Friendship')) themes.add('friendship');
-        if (interests['topics'].toString().contains('mental health')) themes.add('mental health');
-        if (interests['topics'].toString().contains('conflict resolution')) themes.add('conflict resolution');
+      if (interests is Map<String, dynamic>) {
+        final topics = interests['topics'];
+        if (topics is String) {
+          if (topics.contains('Friendship')) themes.add('friendship');
+          if (topics.contains('mental health')) themes.add('mental health');
+          if (topics.contains('conflict resolution')) themes.add('conflict resolution');
+        }
       }
-    }
-    
-    if (userData['dislikes'] != null) {
+      
+      // Safe access to dislikes
       final dislikes = userData['dislikes'];
-      if (dislikes['situations']?.toString().contains('bored') ?? false) {
-        themes.add('overcoming boredom');
+      if (dislikes is Map<String, dynamic>) {
+        final situations = dislikes['situations'];
+        if (situations is String) {
+          if (situations.contains('bored')) themes.add('overcoming boredom');
+          if (situations.contains('quarreling')) themes.add('conflict resolution');
+        }
       }
-      if (dislikes['situations']?.toString().contains('quarreling') ?? false) {
-        themes.add('conflict resolution');
-      }
-    }
-    
-    if (userData['preferences'] != null) {
+      
+      // Safe access to preferences
       final preferences = userData['preferences'];
-      if (preferences['other']?.toString().contains('friendship recovery') ?? false) {
-        themes.add('friendship repair');
+      if (preferences is Map<String, dynamic>) {
+        final other = preferences['other'];
+        if (other is String && other.contains('friendship recovery')) {
+          themes.add('friendship repair');
+        }
       }
+    } catch (e) {
+      print("Error extracting themes: $e");
     }
     
+    // Fallback themes
     if (themes.length < 3) {
       themes.addAll(['mindfulness', 'emotional wellness', 'self-care']);
     }
     
-    return themes;
+    return themes.take(5).toList(); // Limit to 5 themes
   }
 
   String _createExercisePrompt() {
     return """
-Based on the following user profile, suggest 10 personalized mental health exercises. 
+Based on the following user profile, suggest 8 personalized mental health exercises. 
 Return the response as a JSON array with each exercise having: title, description, duration, and category.
 
 User Profile:
-- Mental Condition: ${userData['mental_condition'] ?? 'Not specified'}
-- Interests: ${userData['interests'] ?? 'Not specified'}
-- Dislikes: ${userData['dislikes'] ?? 'Not specified'}
-- Preferences: ${userData['preferences'] ?? 'Not specified'}
-- Summary: ${userData['summary'] ?? 'Not specified'}
+- Mental Condition: ${_safeString(userData['mental_condition'])}
+- Interests: ${_safeString(userData['interests'])}
+- Dislikes: ${_safeString(userData['dislikes'])}
+- Preferences: ${_safeString(userData['preferences'])}
+- Summary: ${_safeString(userData['summary'])}
 
-Provide the response in valid JSON format only.
+Provide the response in valid JSON format only. Example:
+[
+  {
+    "title": "Exercise Name",
+    "description": "Detailed description",
+    "duration": "5 minutes", 
+    "category": "Category Name"
+  }
+]
 """;
   }
 
   String _createMusicPrompt() {
     return """
-Based on the following user profile, suggest 10 personalized songs for mental health and emotional well-being.
+Based on the following user profile, suggest 8 personalized songs for mental health and emotional well-being.
 Return ONLY a valid JSON array with each song object having exactly these fields: title, artist, description.
 
 IMPORTANT: Return ONLY the JSON array, no additional text or explanations.
 
-Example format:
-[
-  {
-    "title": "Song Title",
-    "artist": "Artist Name", 
-    "description": "Why this song is recommended"
-  }
-]
-
 User Profile:
-- Mental Condition: ${userData['mental_condition'] ?? 'Not specified'}
-- Interests: ${userData['interests'] ?? 'Not specified'}
-- Dislikes: ${userData['dislikes'] ?? 'Not specified'}
-- Preferences: ${userData['preferences'] ?? 'Not specified'}
-- Summary: ${userData['summary'] ?? 'Not specified'}
+- Mental Condition: ${_safeString(userData['mental_condition'])}
+- Interests: ${_safeString(userData['interests'])}
+- Dislikes: ${_safeString(userData['dislikes'])}
+- Preferences: ${_safeString(userData['preferences'])}
+- Summary: ${_safeString(userData['summary'])}
 
-Focus on songs that would help with the user's specific mental health needs.
+Recommend songs that cater to the user's mental health requirements while giving priority to their religious preferences and values.
 """;
   }
 
-  List<dynamic> _parseExerciseResponse(String text) {
+  String _safeString(dynamic value) {
+    if (value == null) return 'Not specified';
+    if (value is String) return value;
+    if (value is Map || value is List) return value.toString();
+    return value.toString();
+  }
+
+  void _openBookPreview(dynamic book) {
     try {
-      final startIndex = text.indexOf('[');
-      final endIndex = text.lastIndexOf(']') + 1;
-      final jsonString = text.substring(startIndex, endIndex);
-      return json.decode(jsonString);
-    } catch (e) {
-      return [
-        {
-          'title': 'Deep Breathing',
-          'description': 'Practice deep breathing for 5 minutes to calm your mind',
-          'duration': '5 minutes',
-          'category': 'Relaxation'
-        },
-        {
-          'title': 'Gratitude Journaling',
-          'description': 'Write down three things you are grateful for today',
-          'duration': '10 minutes',
-          'category': 'Mindfulness'
+      if (book is Map<String, dynamic> && 
+          book.containsKey('volumeInfo') && 
+          book['volumeInfo'] is Map<String, dynamic>) {
+        
+        final volumeInfo = book['volumeInfo'] as Map<String, dynamic>;
+        final previewLink = volumeInfo['previewLink'];
+        final title = volumeInfo['title'] ?? 'Book Preview';
+        
+        if (previewLink is String && previewLink.isNotEmpty) {
+          Navigator.pushNamed(
+            context, 
+            '/book_preview', 
+            arguments: {'url': previewLink, 'title': title}
+          );
+          return;
         }
-      ];
-    }
-  }
-
-  List<dynamic> _parseMusicResponse(String text) {
-    try {
-      final jsonPattern = RegExp(r'\[.*\]', multiLine: true, dotAll: true);
-      final match = jsonPattern.firstMatch(text);
-      
-      if (match != null) {
-        final jsonString = match.group(0);
-        return json.decode(jsonString!);
       }
       
-      return _getFallbackSongs();
+      _showErrorDialog('Preview Not Available', 'Sorry, no preview is available for this book.');
     } catch (e) {
-      return _getFallbackSongs();
+      _showErrorDialog('Error', 'Failed to open book preview: $e');
     }
   }
 
-  void _openBookPreview(book) {
-    final previewLink = book['volumeInfo']?['previewLink'];
-    final title = book['volumeInfo']?['title'] ?? 'Book Preview';
-    
-    if (previewLink != null) {
-      Navigator.pushNamed(
-        context, 
-        '/book_preview', 
-        arguments: {'url': previewLink, 'title': title}
-      );
-    } else {
-      showDialog(
-        context: context,
-        builder: (context) => AlertDialog(
-          backgroundColor: _currentTheme.containerColor,
-          title: const Text('Preview Not Available'),
-          content: Text('Sorry, no preview is available for "$title".'),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: Text('OK', style: TextStyle(color: _currentTheme.primary)),
-            )
-          ],
-        ),
-      );
-    }
-  }
-
-  void _openSpotifySong(song) async {
-    final spotifyUrl = song['external_urls']?['spotify'];
-    final songName = song['name'] ?? 'Song';
-    
-    if (spotifyUrl != null) {
-      if (await canLaunchUrl(Uri.parse(spotifyUrl))) {
-        await launchUrl(Uri.parse(spotifyUrl));
-      } else {
-        showDialog(
-          context: context,
-          builder: (context) => AlertDialog(
-            backgroundColor: _currentTheme.containerColor,
-            title: Text('Cannot Open $songName'),
-            content: const Text('Please install Spotify to open this song.'),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: Text('OK', style: TextStyle(color: _currentTheme.primary)),
-              )
-            ],
-          ),
-        );
+  void _openSpotifySong(dynamic song) async {
+    try {
+      if (song is Map<String, dynamic> && 
+          song.containsKey('external_urls') && 
+          song['external_urls'] is Map<String, dynamic>) {
+        
+        final externalUrls = song['external_urls'] as Map<String, dynamic>;
+        final spotifyUrl = externalUrls['spotify'];
+        final songName = song['name']?.toString() ?? 'Song';
+        
+        if (spotifyUrl is String && spotifyUrl.isNotEmpty) {
+          if (await canLaunchUrl(Uri.parse(spotifyUrl))) {
+            await launchUrl(Uri.parse(spotifyUrl));
+            return;
+          }
+        }
       }
-    } else {
-      showDialog(
-        context: context,
-        builder: (context) => AlertDialog(
-          backgroundColor: _currentTheme.containerColor,
-          title: const Text('No Spotify Link Available'),
-          content: Text('Sorry, no Spotify link is available for "$songName".'),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: Text('OK', style: TextStyle(color: _currentTheme.primary)),
-            )
-          ],
-        ),
-      );
+      
+      _showErrorDialog('Cannot Open Song', 'Please install Spotify to open this song.');
+    } catch (e) {
+      _showErrorDialog('Error', 'Failed to open Spotify: $e');
     }
+  }
+
+  void _showErrorDialog(String title, String content) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: _currentTheme.containerColor,
+        title: Text(title),
+        content: Text(content),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('OK', style: TextStyle(color: _currentTheme.primary)),
+          )
+        ],
+      ),
+    );
   }
 
   void _playPauseSong(int index, String? previewUrl) async {
-    if (previewUrl == null || previewUrl.isEmpty) {
-      showDialog(
-        context: context,
-        builder: (context) => AlertDialog(
-          backgroundColor: _currentTheme.containerColor,
-          title: const Text('Preview Not Available'),
-          content: const Text('Sorry, no preview is available for this song.'),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: Text('OK', style: TextStyle(color: _currentTheme.primary)),
-            )
-          ],
-        ),
-      );
-      return;
-    }
-
-    if (currentlyPlayingIndex == index && playerState == PlayerState.playing) {
-      await audioPlayer.pause();
-      setState(() {
-        playerState = PlayerState.paused;
-      });
-    } else if (currentlyPlayingIndex == index && playerState == PlayerState.paused) {
-      await audioPlayer.resume();
-      setState(() {
-        playerState = PlayerState.playing;
-      });
-    } else {
-      if (currentlyPlayingIndex != null) {
-        await audioPlayer.stop();
+    try {
+      if (previewUrl == null || previewUrl.isEmpty) {
+        _showErrorDialog('Preview Not Available', 'Sorry, no preview is available for this song.');
+        return;
       }
-      
-      await audioPlayer.play(UrlSource(previewUrl));
-      setState(() {
-        currentlyPlayingIndex = index;
-        playerState = PlayerState.playing;
-      });
-      
-      audioPlayer.onPlayerComplete.listen((event) {
+
+      if (currentlyPlayingIndex == index && playerState == PlayerState.playing) {
+        await audioPlayer.pause();
         setState(() {
-          playerState = PlayerState.stopped;
-          currentlyPlayingIndex = null;
+          playerState = PlayerState.paused;
         });
-      });
+      } else if (currentlyPlayingIndex == index && playerState == PlayerState.paused) {
+        await audioPlayer.resume();
+        setState(() {
+          playerState = PlayerState.playing;
+        });
+      } else {
+        if (currentlyPlayingIndex != null) {
+          await audioPlayer.stop();
+        }
+        
+        await audioPlayer.play(UrlSource(previewUrl));
+        setState(() {
+          currentlyPlayingIndex = index;
+          playerState = PlayerState.playing;
+        });
+        
+        audioPlayer.onPlayerComplete.listen((event) {
+          if (mounted) {
+            setState(() {
+              playerState = PlayerState.stopped;
+              currentlyPlayingIndex = null;
+            });
+          }
+        });
+      }
+    } catch (e) {
+      _showErrorDialog('Playback Error', 'Failed to play audio: $e');
     }
   }
 
@@ -658,6 +795,23 @@ Focus on songs that would help with the user's specific mental health needs.
   }
 
   Widget _buildContent() {
+    if (isLoading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    
+    if (errorMessage != null) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: Text(
+            errorMessage!,
+            style: const TextStyle(color: Colors.red, fontSize: 16),
+            textAlign: TextAlign.center,
+          ),
+        ),
+      );
+    }
+
     switch (_currentSection) {
       case 0:
         return _buildBooksSection();
@@ -666,22 +820,32 @@ Focus on songs that would help with the user's specific mental health needs.
       case 2:
         return _buildMusicSection();
       default:
-        return Container();
+        return const Center(child: Text('Select a category'));
     }
   }
 
   Widget _buildBooksSection() {
+    if (bookRecommendations.isEmpty) {
+      return const Center(child: Text('No book recommendations available'));
+    }
+
     return ListView.builder(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
       itemCount: bookRecommendations.length,
       itemBuilder: (context, index) {
         final book = bookRecommendations[index];
+        if (book is! Map<String, dynamic>) return const SizedBox();
+
         final volumeInfo = book['volumeInfo'];
-        final title = volumeInfo?['title'] ?? 'Unknown Title';
-        final authors = volumeInfo?['authors'] != null 
-            ? volumeInfo['authors'].join(', ') 
+        if (volumeInfo is! Map<String, dynamic>) return const SizedBox();
+
+        final title = (volumeInfo['title'] ?? 'Unknown Title') as String;
+        final authors = volumeInfo['authors'] is List 
+            ? (volumeInfo['authors'] as List).join(', ')
             : 'Unknown Author';
-        final thumbnail = volumeInfo?['imageLinks']?['thumbnail'] ?? '';
+        final thumbnail = volumeInfo['imageLinks'] is Map<String, dynamic>
+            ? (volumeInfo['imageLinks']['thumbnail'] ?? '') as String
+            : '';
         
         return Padding(
           padding: const EdgeInsets.only(bottom: 16.0),
@@ -711,15 +875,13 @@ Focus on songs that would help with the user's specific mental health needs.
                       height: 180,
                       width: double.infinity,
                       fit: BoxFit.cover,
+                      errorBuilder: (context, error, stackTrace) {
+                        return _buildPlaceholderIcon(Icons.book);
+                      },
                     ),
                   )
                 else
-                  Container(
-                    height: 180,
-                    width: double.infinity,
-                    color: Colors.grey[300],
-                    child: Icon(Icons.book, size: 60, color: _currentTheme.primary),
-                  ),
+                  _buildPlaceholderIcon(Icons.book),
                 const SizedBox(height: 8),
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 12.0),
@@ -758,9 +920,7 @@ Focus on songs that would help with the user's specific mental health needs.
                       borderRadius: BorderRadius.circular(8),
                     ),
                   ),
-                  onPressed: () {
-                    _openBookPreview(book);
-                  },
+                  onPressed: () => _openBookPreview(book),
                   child: const Text("Read Preview"),
                 ),
                 const SizedBox(height: 12),
@@ -773,12 +933,17 @@ Focus on songs that would help with the user's specific mental health needs.
   }
 
   Widget _buildExercisesSection() {
+    if (exerciseRecommendations.isEmpty) {
+      return const Center(child: Text('No exercise recommendations available'));
+    }
+
     return ListView.builder(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
       itemCount: exerciseRecommendations.length,
       itemBuilder: (context, index) {
         final exercise = exerciseRecommendations[index];
-        
+        if (exercise is! Map<String, dynamic>) return const SizedBox();
+
         return Padding(
           padding: const EdgeInsets.only(bottom: 16.0),
           child: Container(
@@ -799,7 +964,7 @@ Focus on songs that would help with the user's specific mental health needs.
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    exercise['title'] ?? 'Exercise',
+                    (exercise['title'] ?? 'Exercise') as String,
                     style: TextStyle(
                       fontSize: 18,
                       fontWeight: FontWeight.bold,
@@ -808,7 +973,7 @@ Focus on songs that would help with the user's specific mental health needs.
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    exercise['description'] ?? '',
+                    (exercise['description'] ?? '') as String,
                     style: const TextStyle(
                       fontSize: 14,
                       color: Colors.black87,
@@ -835,11 +1000,17 @@ Focus on songs that would help with the user's specific mental health needs.
   }
 
   Widget _buildMusicSection() {
+    if (songRecommendations.isEmpty) {
+      return const Center(child: Text('No music recommendations available'));
+    }
+
     return ListView.builder(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
       itemCount: songRecommendations.length,
       itemBuilder: (context, index) {
         final song = songRecommendations[index];
+        if (song is! Map<String, dynamic>) return const SizedBox();
+
         final title = song['name']?.toString() ?? song['title']?.toString() ?? 'Unknown Song';
         final artists = song['artists'] != null 
             ? _getArtistNames(song['artists']) 
@@ -878,22 +1049,12 @@ Focus on songs that would help with the user's specific mental health needs.
                       width: double.infinity,
                       fit: BoxFit.cover,
                       errorBuilder: (context, error, stackTrace) {
-                        return Container(
-                          height: 180,
-                          width: double.infinity,
-                          color: Colors.grey[300],
-                          child: Icon(Icons.music_note, size: 60, color: _currentTheme.primary),
-                        );
+                        return _buildPlaceholderIcon(Icons.music_note);
                       },
                     ),
                   )
                 else
-                  Container(
-                    height: 180,
-                    width: double.infinity,
-                    color: Colors.grey[300],
-                    child: Icon(Icons.music_note, size: 60, color: _currentTheme.primary),
-                  ),
+                  _buildPlaceholderIcon(Icons.music_note),
                 const SizedBox(height: 8),
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 12.0),
@@ -944,9 +1105,7 @@ Focus on songs that would help with the user's specific mental health needs.
                           size: 30,
                           color: _currentTheme.primary,
                         ),
-                        onPressed: () {
-                          _openSpotifySong(song);
-                        },
+                        onPressed: () => _openSpotifySong(song),
                       ),
                   ],
                 ),
@@ -956,6 +1115,15 @@ Focus on songs that would help with the user's specific mental health needs.
           ),
         );
       },
+    );
+  }
+
+  Widget _buildPlaceholderIcon(IconData icon) {
+    return Container(
+      height: 180,
+      width: double.infinity,
+      color: Colors.grey[300],
+      child: Icon(icon, size: 60, color: _currentTheme.primary),
     );
   }
 
@@ -987,9 +1155,7 @@ Focus on songs that would help with the user's specific mental health needs.
                   children: [
                     IconButton(
                       icon: const Icon(Icons.arrow_back, size: 20, color: Colors.black),
-                      onPressed: () {
-                        Navigator.pop(context); 
-                      },
+                      onPressed: () => Navigator.pop(context),
                     ),
                     const Text(
                       "Let's keep it positive",
@@ -1001,9 +1167,7 @@ Focus on songs that would help with the user's specific mental health needs.
                     ),
                     IconButton(
                       icon: const Icon(Icons.settings, size: 20, color: Colors.black),
-                      onPressed: () {
-                        Navigator.pushNamed(context, "/set");
-                      },
+                      onPressed: () => Navigator.pushNamed(context, "/set"),
                     ),
                   ],
                 ),
@@ -1011,104 +1175,27 @@ Focus on songs that would help with the user's specific mental health needs.
 
               const SizedBox(height: 16),
 
-              // Section Buttons with theme colors
+              // Section Buttons
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16.0),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Expanded(
-                      child: ElevatedButton(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: _currentSection == 0 ? _currentTheme.primary : Colors.white,
-                          foregroundColor: _currentSection == 0 ? Colors.white : Colors.black,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                        ),
-                        onPressed: () {
-                          setState(() {
-                            _currentSection = 0;
-                          });
-                        },
-                        child: const Text(
-                          'Books',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(fontSize: 14),
-                        ),
-                      ),
-                    ),
+                    _buildSectionButton(0, 'Books'),
                     const SizedBox(width: 8),
-                    Expanded(
-                      child: ElevatedButton(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: _currentSection == 1 ? _currentTheme.primary : Colors.white,
-                          foregroundColor: _currentSection == 1 ? Colors.white : Colors.black,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                        ),
-                        onPressed: () {
-                          setState(() {
-                            _currentSection = 1;
-                          });
-                        },
-                        child: const Text(
-                          'Exercises',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(fontSize: 14),
-                        ),
-                      ),
-                    ),
+                    _buildSectionButton(1, 'Exercises'),
                     const SizedBox(width: 8),
-                    Expanded(
-                      child: ElevatedButton(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: _currentSection == 2 ? _currentTheme.primary : Colors.white,
-                          foregroundColor: _currentSection == 2 ? Colors.white : Colors.black,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                        ),
-                        onPressed: () {
-                          setState(() {
-                            _currentSection = 2;
-                          });
-                        },
-                        child: const Text(
-                          'Music',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(fontSize: 14),
-                        ),
-                      ),
-                    ),
+                    _buildSectionButton(2, 'Music'),
                   ],
                 ),
               ),
 
               const SizedBox(height: 16),
 
-              if (isLoading)
-                const Expanded(
-                  child: Center(
-                    child: CircularProgressIndicator(),
-                  ),
-                )
-              else if (errorMessage != null)
-                Expanded(
-                  child: Center(
-                    child: Text(
-                      errorMessage!,
-                      style: const TextStyle(color: Colors.red),
-                    ),
-                  ),
-                )
-              else
-                Expanded(
-                  child: _buildContent(),
-                ),
+              // Content Area
+              Expanded(child: _buildContent()),
 
-              // Bottom Container with theme colors
+              // Bottom Navigation
               Container(
                 padding: const EdgeInsets.symmetric(vertical: 10),
                 decoration: BoxDecoration(
@@ -1126,7 +1213,7 @@ Focus on songs that would help with the user's specific mental health needs.
                         Navigator.pushReplacement(
                           context,
                           MaterialPageRoute(
-                            builder: (context) => HomeScreen(userData: widget.p_userData),
+                            builder: (context) => HomeScreen(userData: widget.pUserData),
                           ),
                         );
                       },
@@ -1136,7 +1223,7 @@ Focus on songs that would help with the user's specific mental health needs.
                         Navigator.push(
                           context,
                           MaterialPageRoute(
-                            builder: (context) => ChatScreen(userData: widget.p_userData),
+                            builder: (context) => ChatScreen(userData: widget.pUserData),
                           ),
                         );
                       },
@@ -1149,21 +1236,41 @@ Focus on songs that would help with the user's specific mental health needs.
                     ),
                     IconButton(
                       icon: const Icon(Icons.account_circle_outlined, size: 30, color: Colors.black),
-                      onPressed: () {
-                        Navigator.pushNamed(context, '/profile');
-                      },
+                      onPressed: () => Navigator.pushNamed(context, '/profile'),
                     ),
                     IconButton(
                       icon: const Icon(Icons.people, size: 30, color: Colors.black),
-                      onPressed: () {
-                        Navigator.pushNamed(context, '/pro');
-                      },
+                      onPressed: () => Navigator.pushNamed(context, '/pro'),
                     ),
                   ],
                 ),
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSectionButton(int sectionIndex, String text) {
+    return Expanded(
+      child: ElevatedButton(
+        style: ElevatedButton.styleFrom(
+          backgroundColor: _currentSection == sectionIndex ? _currentTheme.primary : Colors.white,
+          foregroundColor: _currentSection == sectionIndex ? Colors.white : Colors.black,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(8),
+          ),
+        ),
+        onPressed: () {
+          setState(() {
+            _currentSection = sectionIndex;
+          });
+        },
+        child: Text(
+          text,
+          textAlign: TextAlign.center,
+          style: const TextStyle(fontSize: 14),
         ),
       ),
     );

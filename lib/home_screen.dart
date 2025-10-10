@@ -4,6 +4,9 @@ import 'package:flutter/material.dart';
 import 'chat_sceen.dart';
 import 'theme_manager.dart';
 import 'exercise_screen.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'dart:async';
 
 class HomeScreen extends StatefulWidget {
   final Map<String, dynamic> userData;
@@ -16,19 +19,42 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   final List<String> motivationalMessages = [
-    "Believe in yourself! 💪",
-    "Every day is a fresh start 🌅",
-    "Stay positive, work hard, make it happen ✨",
-    "Little progress each day adds up to big results 📈",
+    "Believe in yourself, stay focused, and embrace challenges as opportunities💪. Success is built daily through discipline, patience, and consistent effort. Trust your journey, keep learning, and never give up hope.💖",
+    "Every sunrise offers a new chance to grow stronger, wiser, and braver🌄. Failure isn't the end but a lesson for tomorrow⏰. Keep moving forward, because persistence always creates amazing victories.👑",
+    "Your dreams matter, so protect them with determination and courage. Stay positive, surround yourself with supportive energy, and work consistently🧋. Remember, little daily progress leads to extraordinary transformations over time.🚀",
+    "Life becomes meaningful when you believe, act, and persist with confidence.🌟 Challenges may slow you, but strength grows from struggles. Shine brightly, inspire others, and let passion guide your purpose.💝",
+    "Great things never come from comfort zones🔥. Dare to step out, explore the unknown, and push your limits. Every risk you take brings you closer to remarkable achievements.🏆",
+    "Your future is created by what you do today, not tomorrow⏳. Stay disciplined, stay hopeful, and keep going forward. Hard work today builds the life you've always dreamed of.🌈",
+    "Storms make trees take deeper roots🌳. Similarly, challenges make you stronger, wiser, and unshakable. Embrace every obstacle as a teacher, for it prepares you for greater victories ahead.⚡",
+    "Don't wait for the perfect moment, create it instead✨. Your determination, passion, and courage can turn ordinary days into extraordinary achievements. Start now, because your best self awaits.🌹",
+    "Doubt kills more dreams than failure ever will💭. Replace fear with faith, and watch how doors of opportunity open when you trust yourself and your vision.🌠",
+    "Discipline is the bridge between goals and accomplishments🌉. Keep showing up, even on tough days. Small consistent efforts build extraordinary results over time.💎",
+    "Happiness is not by chance, but by choice😊. Choose gratitude, kindness, and positivity every day, and your life will bloom beautifully like a garden.🌸",
+    "The harder you work for something, the greater you'll feel when you achieve it⚡. Keep grinding, your success story is being written every single day.📖",
+    "Opportunities don't happen, you create them🌍. Stay active, curious, and fearless, because your actions shape the future you dream of.✨",
+    "Don't compare your journey to others🌱. Focus on your growth, your path, your progress. Flowers bloom at different times, but each shines beautifully in its season.🌻",
+    "A river cuts through rock not because of its power, but its persistence💦. Stay steady, never give up, and you'll achieve things once thought impossible.🏔️",
+    "Your potential is endless♾️. Don't let doubts or fears limit what you can achieve. Believe, act, and transform your dreams into a beautiful reality.🌠",
+    "Success is not final, failure is not fatal; it's the courage to continue that counts🔥. Keep moving, keep learning, and you'll rise stronger every time.🦅",
+    "Big journeys begin with small steps👣. Don't underestimate little actions you take daily—they build the foundation for greatness. Stay patient, trust the process, and keep walking forward.🌈",
   ];
 
   int _currentThemeIndex = 0;
   ColorTheme _currentTheme = ThemeManager.colorThemes[0];
+  int _unreadCount = 0;
+  StreamSubscription<QuerySnapshot>? _notificationSubscription;
 
   @override
   void initState() {
     super.initState();
     _loadTheme();
+    _setupNotificationListener();
+  }
+
+  @override
+  void dispose() {
+    _notificationSubscription?.cancel();
+    super.dispose();
   }
 
   Future<void> _loadTheme() async {
@@ -37,6 +63,23 @@ class _HomeScreenState extends State<HomeScreen> {
       _currentThemeIndex = themeIndex;
       _currentTheme = ThemeManager.getCurrentTheme(themeIndex);
     });
+  }
+
+  void _setupNotificationListener() {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user != null) {
+      _notificationSubscription = FirebaseFirestore.instance
+          .collection('userNotifications')
+          .doc(user.uid)
+          .collection('notifications')
+          .where('read', isEqualTo: false)
+          .snapshots()
+          .listen((snapshot) {
+        setState(() {
+          _unreadCount = snapshot.docs.length;
+        });
+      });
+    }
   }
 
   ImageProvider _getProfileImage() {
@@ -98,11 +141,40 @@ class _HomeScreenState extends State<HomeScreen> {
                         Navigator.pushNamed(context, "/set");
                       },
                     ),
-                    IconButton(
-                      icon: const Icon(Icons.notifications_none, size: 28, color: Colors.black),
-                      onPressed: () {
-                        Navigator.pushNamed(context, '/note');
-                      },
+                    Stack(
+                      children: [
+                        IconButton(
+                          icon: const Icon(Icons.notifications_none, size: 28, color: Colors.black),
+                          onPressed: () {
+                            Navigator.pushNamed(context, '/note');
+                          },
+                        ),
+                        if (_unreadCount > 0)
+                          Positioned(
+                            right: 8,
+                            top: 8,
+                            child: Container(
+                              padding: const EdgeInsets.all(2),
+                              decoration: BoxDecoration(
+                                color: Colors.red,
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              constraints: const BoxConstraints(
+                                minWidth: 16,
+                                minHeight: 16,
+                              ),
+                              child: Text(
+                                _unreadCount > 99 ? '99+' : _unreadCount.toString(),
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                                textAlign: TextAlign.center,
+                              ),
+                            ),
+                          ),
+                      ],
                     ),
                   ],
                 ),
@@ -144,7 +216,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       "Hi, $userName!\nWelcome Back!",
                       textAlign: TextAlign.center,
                       style: const TextStyle(
-                        fontSize: 24,
+                        fontSize: 25,
                         fontWeight: FontWeight.bold,
                       ),
                     ),
@@ -153,7 +225,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       email,
                       style: const TextStyle(fontSize: 16, color: Colors.black54),
                     ),
-                    const SizedBox(height: 200),
+                    const SizedBox(height: 100),
 
                     // Motivational Message Box with theme container color
                     Padding(
@@ -225,7 +297,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           context,
                           MaterialPageRoute(
                             builder: (context) => RecommendationsScreen(
-                              p_userData: widget.userData, 
+                              pUserData: widget.userData, 
                               userId: 'AYPqR0TqB4cjbZeofNIPYAOTtWO2'
                             ),
                           ),

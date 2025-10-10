@@ -482,7 +482,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                        Navigator.push(
                           context,
                           MaterialPageRoute(
-                            builder: (context) => RecommendationsScreen(p_userData: _userData, userId: _currentUser?.uid ?? 'default_user_id'),
+                            builder: (context) => RecommendationsScreen(pUserData: _userData, userId: _currentUser?.uid ?? 'default_user_id'),
                           ),
                         );
                       },
@@ -754,7 +754,10 @@ class _NotificationTimeSettingsDialogState extends State<NotificationTimeSetting
                                     color: widget.primaryColor,
                                   ),
                                   title: Text(timeOption.label),
-                                  subtitle: Text(_formatTime(timeOption.time)),
+                                  subtitle: Text(_formatTime(timeOption.time),
+                                   style: const TextStyle(
+                                    fontSize: 10,   
+                                  ),),
                                   trailing: Row(
                                     mainAxisSize: MainAxisSize.min,
                                     children: [
