@@ -756,7 +756,7 @@ class _NotificationTimeSettingsDialogState extends State<NotificationTimeSetting
                                   title: Text(timeOption.label),
                                   subtitle: Text(_formatTime(timeOption.time),
                                    style: const TextStyle(
-                                    fontSize: 10,   
+                                    fontSize: 7,   
                                   ),),
                                   trailing: Row(
                                     mainAxisSize: MainAxisSize.min,

@@ -225,7 +225,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       email,
                       style: const TextStyle(fontSize: 16, color: Colors.black54),
                     ),
-                    const SizedBox(height: 100),
+                    const SizedBox(height: 90),
 
                     // Motivational Message Box with theme container color
                     Padding(
@@ -248,7 +248,7 @@ class _HomeScreenState extends State<HomeScreen> {
                             randomMessage,
                             textAlign: TextAlign.center,
                             style: const TextStyle(
-                              fontSize: 20,
+                              fontSize: 15,
                               color: Colors.black87,
                               fontWeight: FontWeight.w500,
                             ),

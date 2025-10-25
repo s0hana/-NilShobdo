@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'dart:convert';
 import 'home_screen.dart';
 import 'chat_sceen.dart';
@@ -31,7 +32,7 @@ class _MentalHealthProfessionalsPageState extends State<MentalHealthProfessional
   Map<String, dynamic> _userData = {};
   User? _currentUser;
   bool _isLoading = true;
-  bool _showDoctors = true; // Toggle between doctors and organizations
+  bool _showDoctors = true;
 
   @override
   void initState() {
@@ -63,7 +64,6 @@ class _MentalHealthProfessionalsPageState extends State<MentalHealthProfessional
             _userData = userDoc.data() as Map<String, dynamic>;
           });
         } else {
-          // If user document doesn't exist, create one with basic data
           await _firestore.collection('users').doc(_currentUser!.uid).set({
             'fullName': _currentUser!.displayName ?? 'User',
             'email': _currentUser!.email ?? '',
@@ -71,7 +71,6 @@ class _MentalHealthProfessionalsPageState extends State<MentalHealthProfessional
             'createdAt': FieldValue.serverTimestamp(),
           });
           
-          // Fetch the newly created document
           DocumentSnapshot newUserDoc = await _firestore
               .collection('users')
               .doc(_currentUser!.uid)
@@ -87,7 +86,43 @@ class _MentalHealthProfessionalsPageState extends State<MentalHealthProfessional
     }
   }
 
-  // Function to decode Base64 image
+  // URL Launcher function
+  Future<void> _launchURL(String url) async {
+    final Uri uri = Uri.parse(url);
+    
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri);
+    } else {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Could not launch $url'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  // Format URLs for social media
+  String? _formatUrl(String? url, String type) {
+    if (url == null || url.isEmpty) return null;
+    
+    String formattedUrl = url.trim();
+    
+    if (!formattedUrl.startsWith('http://') && !formattedUrl.startsWith('https://')) {
+      formattedUrl = 'https://$formattedUrl';
+    }
+    
+    if (type == 'facebook' && !formattedUrl.contains('facebook.com')) {
+      formattedUrl = 'https://facebook.com/$formattedUrl';
+    } else if (type == 'linkedin' && !formattedUrl.contains('linkedin.com')) {
+      formattedUrl = 'https://linkedin.com/in/$formattedUrl';
+    }
+    
+    return formattedUrl;
+  }
+
   ImageProvider? _getImageProvider(dynamic photoData) {
     if (photoData == null || photoData.toString().isEmpty) {
       return const AssetImage('assets/default_avatar.png');
@@ -96,18 +131,14 @@ class _MentalHealthProfessionalsPageState extends State<MentalHealthProfessional
     try {
       final String photoString = photoData.toString();
       
-      // Check if it's a Base64 data URL
       if (photoString.startsWith('data:image/')) {
-        // Extract Base64 part from data URL
         final base64String = photoString.split(',').last;
         final bytes = base64.decode(base64String);
         return MemoryImage(bytes);
       }
-      // Check if it's a regular URL
       else if (photoString.startsWith('http')) {
         return NetworkImage(photoString);
       }
-      // Assume it's raw Base64 without data URL prefix
       else {
         final bytes = base64.decode(photoString);
         return MemoryImage(bytes);
@@ -118,7 +149,6 @@ class _MentalHealthProfessionalsPageState extends State<MentalHealthProfessional
     }
   }
 
-  // Function to check if photo data is Base64
   bool _isBase64Photo(dynamic photoData) {
     if (photoData == null || photoData.toString().isEmpty) return false;
     
@@ -129,7 +159,6 @@ class _MentalHealthProfessionalsPageState extends State<MentalHealthProfessional
 
   Future<void> _fetchProfessionals() async {
     try {
-      // Fetch doctors from Realtime Database
       final doctorsSnapshot = await _database.ref('doctors').once();
       final organizationsSnapshot = await _database.ref('organizations').once();
 
@@ -243,7 +272,7 @@ class _MentalHealthProfessionalsPageState extends State<MentalHealthProfessional
                               borderRadius: BorderRadius.circular(4),
                             ),
                             child: Text(
-                              'Base64 Image',
+                              '',
                               style: TextStyle(
                                 fontSize: 10,
                                 color: _currentTheme.primary,
@@ -340,7 +369,7 @@ class _MentalHealthProfessionalsPageState extends State<MentalHealthProfessional
                 ),
                 const SizedBox(height: 8),
               ],
-              // Social Media Links
+              // Updated Social Media Links section with clickable chips
               if ((professional['website'] != null && professional['website'].toString().isNotEmpty) ||
                   (professional['facebook'] != null && professional['facebook'].toString().isNotEmpty) ||
                   (professional['linkedin'] != null && professional['linkedin'].toString().isNotEmpty)) ...[
@@ -358,19 +387,43 @@ class _MentalHealthProfessionalsPageState extends State<MentalHealthProfessional
                   spacing: 10,
                   children: [
                     if (professional['website'] != null && professional['website'].toString().isNotEmpty)
-                      Chip(
-                        label: const Text('Website'),
-                        backgroundColor: _currentTheme.primary.withOpacity(0.1),
+                      InkWell(
+                        onTap: () {
+                          final url = _formatUrl(professional['website'].toString(), 'website');
+                          if (url != null) {
+                            _launchURL(url);
+                          }
+                        },
+                        child: Chip(
+                          label: const Text('Website'),
+                          backgroundColor: _currentTheme.primary.withOpacity(0.1),
+                        ),
                       ),
                     if (professional['facebook'] != null && professional['facebook'].toString().isNotEmpty)
-                      Chip(
-                        label: const Text('Facebook'),
-                        backgroundColor: _currentTheme.primary.withOpacity(0.1),
+                      InkWell(
+                        onTap: () {
+                          final url = _formatUrl(professional['facebook'].toString(), 'facebook');
+                          if (url != null) {
+                            _launchURL(url);
+                          }
+                        },
+                        child: Chip(
+                          label: const Text('Facebook'),
+                          backgroundColor: _currentTheme.primary.withOpacity(0.1),
+                        ),
                       ),
                     if (professional['linkedin'] != null && professional['linkedin'].toString().isNotEmpty)
-                      Chip(
-                        label: const Text('LinkedIn'),
-                        backgroundColor: _currentTheme.primary.withOpacity(0.1),
+                      InkWell(
+                        onTap: () {
+                          final url = _formatUrl(professional['linkedin'].toString(), 'linkedin');
+                          if (url != null) {
+                            _launchURL(url);
+                          }
+                        },
+                        child: Chip(
+                          label: const Text('LinkedIn'),
+                          backgroundColor: _currentTheme.primary.withOpacity(0.1),
+                        ),
                       ),
                   ],
                 ),
@@ -519,7 +572,7 @@ class _MentalHealthProfessionalsPageState extends State<MentalHealthProfessional
                           borderRadius: BorderRadius.circular(4),
                         ),
                         child: Text(
-                          'B64',
+                          '',
                           style: TextStyle(
                             fontSize: 8,
                             color: Colors.white,
@@ -610,44 +663,6 @@ class _MentalHealthProfessionalsPageState extends State<MentalHealthProfessional
     );
   }
 
-  // Function to show image in full screen
-  void _showFullScreenImage(dynamic photoData) {
-    final photoProvider = _getImageProvider(photoData);
-    
-    showDialog(
-      context: context,
-      builder: (context) {
-        return Dialog(
-          backgroundColor: Colors.transparent,
-          insetPadding: const EdgeInsets.all(20),
-          child: Stack(
-            children: [
-              Container(
-                width: double.infinity,
-                height: 400,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(16),
-                  image: DecorationImage(
-                    image: photoProvider ?? const AssetImage('assets/images/user_photo.png'),
-                    fit: BoxFit.contain,
-                  ),
-                ),
-              ),
-              Positioned(
-                top: 10,
-                right: 10,
-                child: IconButton(
-                  icon: const Icon(Icons.close, color: Colors.white, size: 30),
-                  onPressed: () => Navigator.of(context).pop(),
-                ),
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -697,7 +712,7 @@ class _MentalHealthProfessionalsPageState extends State<MentalHealthProfessional
 
               const SizedBox(height: 10),
 
-              // Toggle Buttons for Doctors/Organizations
+              // Toggle Buttons
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16.0),
                 child: Row(
@@ -838,7 +853,7 @@ class _MentalHealthProfessionalsPageState extends State<MentalHealthProfessional
                           ),
               ),
 
-              // Bottom Bar
+              // Bottom Navigation Bar
               Container(
                 padding: const EdgeInsets.symmetric(vertical: 10),
                 decoration: BoxDecoration(
